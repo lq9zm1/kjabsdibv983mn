@@ -19,7 +19,7 @@ WITH base AS (
   SELECT ticker, date, high, low, adj_close, volume,
          LAG(adj_close) OVER (PARTITION BY ticker ORDER BY date) AS prev_adj
   FROM `stonks-498420.stonks_data.price_history`
-  WHERE date >= '2024-01-01'
+  WHERE date >= '2024-01-01' AND date < CURRENT_DATE()
 ),
 perrow AS (
   SELECT ticker, date, adj_close,
