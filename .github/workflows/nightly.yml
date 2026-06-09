@@ -1,0 +1,32 @@
+name: stonks-nightly
+
+on:
+  schedule:
+    # 06:30 UTC = ~01:30 AM Central — finishes well before the 3:00 AM sheet refresh.
+    # GitHub cron is always UTC. Adjust if you change timezones.
+    - cron: "30 6 * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Write BigQuery service-account key
+        run: echo '${{ secrets.GCP_SA_KEY }}' > "$HOME/key.json"
+
+      - name: Run nightly ingestion + rebuilds
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
+        run: python run_nightly.py
