@@ -16,7 +16,7 @@ WITH px AS (
     AVG(adj_close) OVER (w ROWS BETWEEN 49 PRECEDING AND CURRENT ROW)  AS sma50,
     AVG(adj_close) OVER (w ROWS BETWEEN 199 PRECEDING AND CURRENT ROW) AS sma200
   FROM `stonks-498420.stonks_data.price_history`
-  WHERE date >= '2024-01-01'
+  WHERE date >= '2024-01-01' AND date < CURRENT_DATE()
   WINDOW w AS (PARTITION BY ticker ORDER BY date)
 ),
 arr AS (
