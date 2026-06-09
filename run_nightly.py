@@ -161,33 +161,56 @@ def run_rebuilds():
 
 # ---- 5. tickers metadata (new tickers only; keep last-known) ----------------
 def refresh_tickers_metadata(pull_list):
-    print("5. refreshing tickers metadata (new only) ...", flush=True)
+    N_PER_NIGHT = 300   # cap so the job stays under timeout; blanks fill over a few nights
+    print("5. refreshing tickers metadata (new + blanks, capped) ...", flush=True)
+
     existing = pd.DataFrame(columns=["ticker", "name", "sector", "industry"])
     if table_exists("tickers"):
-        existing = bq.query(f"SELECT ticker,name,sector,industry FROM `{tbl('tickers')}`").to_dataframe()
-    have = set(existing["ticker"]) if not existing.empty else set()
-    new = [t for t in pull_list if t not in have]
-    rows = []
-    for t in new:
-        name = sector = industry = None
+        existing = bq.query(
+            f"SELECT ticker,name,sector,industry FROM `{tbl('tickers')}`"
+        ).to_dataframe()
+
+    active = set(pull_list)
+    meta = {}
+    if not existing.empty:
+        for _, r in existing.iterrows():
+            if r["ticker"] in active:
+                meta[r["ticker"]] = {"name": r.get("name"),
+                                     "sector": r.get("sector"),
+                                     "industry": r.get("industry")}
+    for t in pull_list:                       # ensure every active ticker has a row
+        meta.setdefault(t, {"name": None, "sector": None, "industry": None})
+
+    def _blank(v):
+        return v is None or (isinstance(v, float) and pd.isna(v)) or v == ""
+    def is_blank(m):
+        return _blank(m["name"]) or _blank(m["sector"]) or _blank(m["industry"])
+
+    targets = [t for t in pull_list if is_blank(meta[t])][:N_PER_NIGHT]
+    print(f"   {len(targets)} tickers need metadata this run (cap {N_PER_NIGHT})")
+
+    filled = 0
+    for t in targets:
         try:
             info = yf.Ticker(pullmod.to_yahoo(t)).get_info()
-            name = info.get("longName") or info.get("shortName")
-            sector = info.get("sector"); industry = info.get("industry")
+            nm  = info.get("longName") or info.get("shortName")
+            sec = info.get("sector"); ind = info.get("industry")
+            if nm:  meta[t]["name"] = nm        # only overwrite when we got a value
+            if sec: meta[t]["sector"] = sec
+            if ind: meta[t]["industry"] = ind
+            if nm or sec or ind: filled += 1
         except Exception:
             pass
-        rows.append({"ticker": t, "name": name, "sector": sector, "industry": industry})
-    fetched = pd.DataFrame(rows) if rows else pd.DataFrame(columns=existing.columns)
-    # keep existing rows for tickers still active; add new; drop tickers no longer pulled
-    keep = existing[existing["ticker"].isin(set(pull_list))] if not existing.empty else existing
-    out = pd.concat([keep, fetched], ignore_index=True).drop_duplicates("ticker", keep="first")
+
+    out = pd.DataFrame([{"ticker": t, **m} for t, m in meta.items()])
     if out.empty:
         print("   (no tickers metadata to write)"); return
     bq.load_table_from_dataframe(
         out, tbl("tickers"),
         job_config=bigquery.LoadJobConfig(write_disposition="WRITE_TRUNCATE"),
     ).result()
-    print(f"   tickers table: {len(out):,} rows ({len(new)} new looked up)")
+    remaining = sum(1 for t in pull_list if is_blank(meta[t]))
+    print(f"   tickers table: {len(out):,} rows | filled {filled} this run | {remaining} still blank")
 
 
 # ---- 6. review log + ticker_review table ------------------------------------
