@@ -1,0 +1,5 @@
+yfinance>=0.2.40
+pandas>=2.0
+google-cloud-bigquery>=3.20
+pyarrow>=14.0
+requests>=2.31
