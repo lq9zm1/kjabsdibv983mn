@@ -25,20 +25,27 @@ arr AS (
     ARRAY_AGG(adj_close ORDER BY date) AS closes
   FROM px GROUP BY ticker
 ),
-ema_unnest AS (
-  SELECT a.ticker, d.date, d.off,
-    ema_series(a.closes,5)[OFFSET(d.off)]  AS ema5,
-    ema_series(a.closes,10)[OFFSET(d.off)] AS ema10,
-    ema_series(a.closes,21)[OFFSET(d.off)] AS ema21
-  FROM arr a, UNNEST(a.dates) AS date WITH OFFSET off
-  JOIN UNNEST([1]) ON TRUE
-  CROSS JOIN UNNEST([STRUCT(date AS date, off AS off)]) d
+-- compute each EMA array ONCE per ticker, then line it up to dates by position
+ema_arrays AS (
+  SELECT ticker, dates,
+    ema_series(closes, 5)  AS e5,
+    ema_series(closes, 10) AS e10,
+    ema_series(closes, 21) AS e21
+  FROM arr
+),
+ema_calc AS (
+  SELECT a.ticker, dt AS date,
+    a.e5[OFFSET(o)]  AS ema5,
+    a.e10[OFFSET(o)] AS ema10,
+    a.e21[OFFSET(o)] AS ema21
+  FROM ema_arrays a, UNNEST(a.dates) AS dt WITH OFFSET o
 ),
 joined AS (
   SELECT p.ticker, p.date, p.adj_close,
-    p.sma5,p.sma10,p.sma20,p.sma50,p.sma200,
-    e.ema5,e.ema10,e.ema21
-  FROM px p JOIN ema_unnest e ON e.ticker=p.ticker AND e.date=p.date
+    p.sma5, p.sma10, p.sma20, p.sma50, p.sma200,
+    e.ema5, e.ema10, e.ema21
+  FROM px p
+  JOIN ema_calc e ON e.ticker = p.ticker AND e.date = p.date
 ),
 flagged AS (
   SELECT ticker, date,
