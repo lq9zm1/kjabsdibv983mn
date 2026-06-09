@@ -18,13 +18,13 @@ CREATE OR REPLACE TABLE `stonks-498420.stonks_data.rs_momentum` AS
 WITH spy AS (
   SELECT date, adj_close AS spy_close
   FROM `stonks-498420.stonks_data.price_history`
-  WHERE date >= '2026-01-01' AND ticker='SPY'
+  WHERE date >= '2026-01-01' AND date < CURRENT_DATE() AND ticker='SPY'
 ),
 rat AS (
   SELECT p.ticker, p.date, p.adj_close/s.spy_close AS ratio
   FROM `stonks-498420.stonks_data.price_history` p
   JOIN spy s USING (date)
-  WHERE p.date >= '2026-01-01'
+  WHERE p.date >= '2026-01-01' AND p.date < CURRENT_DATE()
 ),
 arr AS (
   SELECT ticker, ARRAY_AGG(ratio ORDER BY date DESC) AS r
