@@ -23,7 +23,7 @@ rets AS (
          ROW_NUMBER() OVER (PARTITION BY p.ticker ORDER BY p.date DESC) AS rn
   FROM `stonks-498420.stonks_data.stock_theme_map` s
   JOIN `stonks-498420.stonks_data.price_history` p USING (ticker)
-  WHERE p.date >= '2025-11-01'
+  WHERE p.date >= '2025-11-01' AND p.date < CURRENT_DATE()
 ),
 win AS ( SELECT sub_theme, ticker, date, ret FROM rets WHERE rn <= 63 AND ret IS NOT NULL ),
 pair_corr AS (
