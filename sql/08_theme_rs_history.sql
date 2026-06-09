@@ -21,7 +21,7 @@ WITH member_ret AS (
     p.adj_close/NULLIF(LAG(p.adj_close) OVER (PARTITION BY p.ticker ORDER BY p.date),0)-1 AS ret
   FROM `stonks-498420.stonks_data.stock_theme_map` s
   JOIN `stonks-498420.stonks_data.price_history` p USING (ticker)
-  WHERE p.date >= '2024-06-01'
+  WHERE p.date >= '2024-06-01' AND p.date < CURRENT_DATE()
 ),
 theme_ret AS (
   SELECT sub_theme, date, AVG(ret) AS tret
@@ -36,7 +36,7 @@ theme_idx AS (
 spy_ret AS (
   SELECT date, adj_close/NULLIF(LAG(adj_close) OVER (ORDER BY date),0)-1 AS sret
   FROM `stonks-498420.stonks_data.price_history`
-  WHERE ticker='SPY' AND date >= '2024-06-01'
+  WHERE ticker='SPY' AND date >= '2024-06-01' AND date < CURRENT_DATE()
 ),
 spy_idx AS (
   SELECT date, EXP(SUM(LN(1+sret)) OVER (ORDER BY date)) AS sidx
