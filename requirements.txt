@@ -3,3 +3,4 @@ pandas>=2.0
 google-cloud-bigquery>=3.20
 pyarrow>=14.0
 requests>=2.31
+db-dtypes>=1.2
