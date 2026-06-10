@@ -1,17 +1,14 @@
 CREATE TEMP FUNCTION ema(arr ARRAY<FLOAT64>, n FLOAT64)
 RETURNS FLOAT64 LANGUAGE js AS r"""
-  if(!arr||!arr.length) return null;
-  var k=2/(n+1), e=arr[0];
-  for(var i=1;i<arr.length;i++){ e=arr[i]*k + e*(1-k); }
+  if(!arr || arr.length < n) return null;
+  var k = 2/(n+1);
+  // seed = SMA of first n values (TradingView ta.ema convention)
+  var seed = 0;
+  for (var i = 0; i < n; i++) seed += arr[i];
+  var e = seed / n;
+  // recurse from index n onward
+  for (var j = n; j < arr.length; j++) { e = arr[j]*k + e*(1-k); }
   return e;
-""";
-CREATE TEMP FUNCTION wilder_atr(tr ARRAY<FLOAT64>, n FLOAT64)
-RETURNS FLOAT64 LANGUAGE js AS r"""
-  if(!tr||tr.length<n) return null;
-  var seed=0; for(var i=0;i<n;i++) seed+=tr[i]; seed/=n;
-  var a=seed;
-  for(var j=n;j<tr.length;j++){ a=(a*(n-1)+tr[j])/n; }
-  return a;
 """;
 
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.metrics_daily` AS
