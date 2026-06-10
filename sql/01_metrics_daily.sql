@@ -11,6 +11,15 @@ RETURNS FLOAT64 LANGUAGE js AS r"""
   return e;
 """;
 
+CREATE TEMP FUNCTION wilder_atr(tr ARRAY<FLOAT64>, n FLOAT64)
+RETURNS FLOAT64 LANGUAGE js AS r"""
+  if(!tr||tr.length<n) return null;
+  var seed=0; for(var i=0;i<n;i++) seed+=tr[i]; seed/=n;
+  var a=seed;
+  for(var j=n;j<tr.length;j++){ a=(a*(n-1)+tr[j])/n; }
+  return a;
+""";
+
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.metrics_daily` AS
 WITH base AS (
   SELECT ticker, date, high, low, adj_close, volume,
