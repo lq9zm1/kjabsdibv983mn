@@ -2,11 +2,9 @@ CREATE TEMP FUNCTION ema(arr ARRAY<FLOAT64>, n FLOAT64)
 RETURNS FLOAT64 LANGUAGE js AS r"""
   if(!arr || arr.length < n) return null;
   var k = 2/(n+1);
-  // seed = SMA of first n values (TradingView ta.ema convention)
   var seed = 0;
   for (var i = 0; i < n; i++) seed += arr[i];
   var e = seed / n;
-  // recurse from index n onward
   for (var j = n; j < arr.length; j++) { e = arr[j]*k + e*(1-k); }
   return e;
 """;
@@ -83,26 +81,40 @@ joined AS (
     ema(a.adj_arr,5) fe5, ema(a.adj_arr,10) fe10, ema(a.adj_arr,21) fe21
   FROM latest l CROSS JOIN spy s
   LEFT JOIN arr a USING (ticker)
+),
+pct AS (
+  SELECT
+    APPROX_QUANTILES(rs_value_21d, 100)[OFFSET(1)]  AS p1,
+    APPROX_QUANTILES(rs_value_21d, 100)[OFFSET(99)] AS p99
+  FROM joined
+),
+s AS (
+  SELECT p.p1, p.p99,
+    STDDEV(LEAST(GREATEST(j.rs_value_21d, p.p1), p.p99)) AS sd
+  FROM joined j CROSS JOIN pct p
+  GROUP BY p.p1, p.p99
 )
 SELECT
-  ticker, date, close,
-  ret_1d, ret_1w, ret_1m, ret_3m, ret_6m, ret_12m,
-  rs_value_21d,
-  ROUND((RANK() OVER (ORDER BY rs_value_21d)-1)*100.0/NULLIF(COUNT(*) OVER()-1,0),0) AS rs_pctile,
-  sma_5, sma_10, sma_20, sma_50, sma_200,
-  ema_5, ema_10, ema_21,
-  px_vs_50sma, px_vs_200sma,
-  atr_pct, adr_pct,
-  ROUND(px_vs_50sma*100/NULLIF(atr_pct,0),4) AS atr_extension,
-  avg_dollar_vol,
-  ROUND(avg_dollar_vol/NULLIF(atr_pct,0),0) AS dvol_per_atr,
-  ret_3d, ret_14d, ret_30d, ret_d1_7, ret_d8_14,
-  IF(rawclose_for_flags > f5,1,0)   AS abv_sma5_eod,
-  IF(rawclose_for_flags > f10,1,0)  AS abv_sma10_eod,
-  IF(rawclose_for_flags > f20,1,0)  AS abv_sma20_eod,
-  IF(rawclose_for_flags > f50,1,0)  AS abv_sma50_eod,
-  IF(rawclose_for_flags > f200,1,0) AS abv_sma200_eod,
-  IF(rawclose_for_flags > fe5,1,0)  AS abv_ema5_eod,
-  IF(rawclose_for_flags > fe10,1,0) AS abv_ema10_eod,
-  IF(rawclose_for_flags > fe21,1,0) AS abv_ema21_eod
-FROM joined;
+  j.ticker, j.date, j.close,
+  j.ret_1d, j.ret_1w, j.ret_1m, j.ret_3m, j.ret_6m, j.ret_12m,
+  CASE WHEN j.ticker='SPY' THEN 50
+       ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(j.rs_value_21d, s.p1), s.p99) / NULLIF(s.sd,0) ))),0)
+  END AS rs_value_21d,
+  ROUND((RANK() OVER (ORDER BY j.rs_value_21d)-1)*100.0/NULLIF(COUNT(*) OVER()-1,0),0) AS rs_pctile,
+  j.sma_5, j.sma_10, j.sma_20, j.sma_50, j.sma_200,
+  j.ema_5, j.ema_10, j.ema_21,
+  j.px_vs_50sma, j.px_vs_200sma,
+  j.atr_pct, j.adr_pct,
+  ROUND(j.px_vs_50sma*100/NULLIF(j.atr_pct,0),4) AS atr_extension,
+  j.avg_dollar_vol,
+  ROUND(j.avg_dollar_vol/NULLIF(j.atr_pct,0),0) AS dvol_per_atr,
+  j.ret_3d, j.ret_14d, j.ret_30d, j.ret_d1_7, j.ret_d8_14,
+  IF(j.rawclose_for_flags > j.f5,1,0)   AS abv_sma5_eod,
+  IF(j.rawclose_for_flags > j.f10,1,0)  AS abv_sma10_eod,
+  IF(j.rawclose_for_flags > j.f20,1,0)  AS abv_sma20_eod,
+  IF(j.rawclose_for_flags > j.f50,1,0)  AS abv_sma50_eod,
+  IF(j.rawclose_for_flags > j.f200,1,0) AS abv_sma200_eod,
+  IF(j.rawclose_for_flags > j.fe5,1,0)  AS abv_ema5_eod,
+  IF(j.rawclose_for_flags > j.fe10,1,0) AS abv_ema10_eod,
+  IF(j.rawclose_for_flags > j.fe21,1,0) AS abv_ema21_eod
+FROM joined j CROSS JOIN s;
