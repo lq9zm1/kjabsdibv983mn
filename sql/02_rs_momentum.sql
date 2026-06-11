@@ -63,9 +63,6 @@ stats AS (
     APPROX_QUANTILES(rs_3d,100)[OFFSET(1)]       AS p1_3d,     APPROX_QUANTILES(rs_3d,100)[OFFSET(99)]       AS p99_3d,
     APPROX_QUANTILES(rs_7d,100)[OFFSET(1)]       AS p1_7d,     APPROX_QUANTILES(rs_7d,100)[OFFSET(99)]       AS p99_7d,
     APPROX_QUANTILES(rs_14d,100)[OFFSET(1)]      AS p1_14d,    APPROX_QUANTILES(rs_14d,100)[OFFSET(99)]      AS p99_14d,
-    APPROX_QUANTILES(rs_1d_3d,100)[OFFSET(1)]    AS p1_1d3d,   APPROX_QUANTILES(rs_1d_3d,100)[OFFSET(99)]    AS p99_1d3d,
-    APPROX_QUANTILES(rs_3d_7d,100)[OFFSET(1)]    AS p1_3d7d,   APPROX_QUANTILES(rs_3d_7d,100)[OFFSET(99)]    AS p99_3d7d,
-    APPROX_QUANTILES(rs_7d_14d,100)[OFFSET(1)]   AS p1_7d14d,  APPROX_QUANTILES(rs_7d_14d,100)[OFFSET(99)]   AS p99_7d14d,
     APPROX_QUANTILES(rs_wow,100)[OFFSET(1)]      AS p1_wow,    APPROX_QUANTILES(rs_wow,100)[OFFSET(99)]      AS p99_wow,
     APPROX_QUANTILES(rs_wow_diff,100)[OFFSET(1)] AS p1_wowd,   APPROX_QUANTILES(rs_wow_diff,100)[OFFSET(99)] AS p99_wowd
   FROM raw
@@ -77,12 +74,29 @@ sd AS (
     STDDEV(LEAST(GREATEST(r.rs_3d,       st.p1_3d),    st.p99_3d))     AS sd_3d,
     STDDEV(LEAST(GREATEST(r.rs_7d,       st.p1_7d),    st.p99_7d))     AS sd_7d,
     STDDEV(LEAST(GREATEST(r.rs_14d,      st.p1_14d),   st.p99_14d))    AS sd_14d,
-    STDDEV(LEAST(GREATEST(r.rs_1d_3d,    st.p1_1d3d),  st.p99_1d3d))   AS sd_1d3d,
-    STDDEV(LEAST(GREATEST(r.rs_3d_7d,    st.p1_3d7d),  st.p99_3d7d))   AS sd_3d7d,
-    STDDEV(LEAST(GREATEST(r.rs_7d_14d,   st.p1_7d14d), st.p99_7d14d))  AS sd_7d14d,
     STDDEV(LEAST(GREATEST(r.rs_wow,      st.p1_wow),   st.p99_wow))    AS sd_wow,
     STDDEV(LEAST(GREATEST(r.rs_wow_diff, st.p1_wowd),  st.p99_wowd))   AS sd_wowd
   FROM raw r CROSS JOIN stats st
+),
+spy_rank AS (
+  SELECT
+    MAX(IF(ticker='SPY', cd_1d3d, NULL))  AS spy_1d3d,
+    MAX(IF(ticker='SPY', cd_3d7d, NULL))  AS spy_3d7d,
+    MAX(IF(ticker='SPY', cd_7d14d, NULL)) AS spy_7d14d
+  FROM (
+    SELECT ticker,
+      CUME_DIST() OVER (ORDER BY rs_1d_3d)  *100 AS cd_1d3d,
+      CUME_DIST() OVER (ORDER BY rs_3d_7d)  *100 AS cd_3d7d,
+      CUME_DIST() OVER (ORDER BY rs_7d_14d) *100 AS cd_7d14d
+    FROM raw
+  )
+),
+ranked AS (
+  SELECT ticker,
+    CUME_DIST() OVER (ORDER BY rs_1d_3d)  *100 AS cd_1d3d,
+    CUME_DIST() OVER (ORDER BY rs_3d_7d)  *100 AS cd_3d7d,
+    CUME_DIST() OVER (ORDER BY rs_7d_14d) *100 AS cd_7d14d
+  FROM raw
 ),
 final AS (
   SELECT
@@ -92,9 +106,12 @@ final AS (
     CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_3d,  st.p1_3d),  st.p99_3d)  / NULLIF(sd.sd_3d,0) ))),0) END AS rs_3d,
     CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_7d,  st.p1_7d),  st.p99_7d)  / NULLIF(sd.sd_7d,0) ))),0) END AS rs_7d,
     CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_14d, st.p1_14d), st.p99_14d) / NULLIF(sd.sd_14d,0) ))),0) END AS rs_14d,
-    CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_1d_3d,  st.p1_1d3d),  st.p99_1d3d)  / NULLIF(sd.sd_1d3d,0) ))),0) END AS rs_1d_3d,
-    CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_3d_7d,  st.p1_3d7d),  st.p99_3d7d)  / NULLIF(sd.sd_3d7d,0) ))),0) END AS rs_3d_7d,
-    CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_7d_14d, st.p1_7d14d), st.p99_7d14d) / NULLIF(sd.sd_7d14d,0) ))),0) END AS rs_7d_14d,
+    CASE WHEN r.ticker='SPY' THEN 50
+         ELSE ROUND(LEAST(GREATEST(rk.cd_1d3d + (50 - sr.spy_1d3d), 0), 100),0) END AS rs_1d_3d,
+    CASE WHEN r.ticker='SPY' THEN 50
+         ELSE ROUND(LEAST(GREATEST(rk.cd_3d7d + (50 - sr.spy_3d7d), 0), 100),0) END AS rs_3d_7d,
+    CASE WHEN r.ticker='SPY' THEN 50
+         ELSE ROUND(LEAST(GREATEST(rk.cd_7d14d + (50 - sr.spy_7d14d), 0), 100),0) END AS rs_7d_14d,
     CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_wow,    st.p1_wow),    st.p99_wow)    / NULLIF(sd.sd_wow,0) ))),0) END AS rs_wow,
     CASE WHEN r.ticker='SPY' THEN 50 ELSE ROUND(100/(1+EXP(-( LEAST(GREATEST(r.rs_wow_diff, st.p1_wowd),  st.p99_wowd)  / NULLIF(sd.sd_wowd,0) ))),0) END AS rs_wow_diff,
     CASE WHEN r.ticker='SPY' THEN 0 ELSE ROUND(ABS(r.rs_14d*100),4) END AS abs_rs_14d,
@@ -105,7 +122,11 @@ final AS (
     CASE WHEN r.ticker='SPY' THEN 100 ELSE ROUND(CUME_DIST() OVER (ORDER BY r.rs_7d)*100,0)     END AS pctile_7d,
     CASE WHEN r.ticker='SPY' THEN 100 ELSE ROUND(CUME_DIST() OVER (ORDER BY r.rs_anchor)*100,0) END AS anchor_pctile,
     CASE WHEN r.ticker='SPY' THEN 100 ELSE ROUND(CUME_DIST() OVER (ORDER BY r.rs_today)*100,0)  END AS today_pctile
-  FROM raw r CROSS JOIN stats st CROSS JOIN sd
+  FROM raw r
+  CROSS JOIN stats st
+  CROSS JOIN sd
+  CROSS JOIN spy_rank sr
+  JOIN ranked rk USING (ticker)
 )
 SELECT *, GREATEST(pctile_1d, pctile_3d) AS short_pctile
 FROM final;
