@@ -17,17 +17,6 @@ agg AS (
     STDDEV_SAMP(group_score) AS ranking_spread
   FROM per_stock GROUP BY sub_theme
 ),
-theme_rs_pct AS (
-  SELECT APPROX_QUANTILES(theme_rs_avg - 50, 100)[OFFSET(1)]  AS tp1,
-         APPROX_QUANTILES(theme_rs_avg - 50, 100)[OFFSET(99)] AS tp99
-  FROM agg
-),
-theme_rs_scale AS (
-  SELECT p.tp1, p.tp99,
-    STDDEV_SAMP(LEAST(GREATEST(a.theme_rs_avg - 50, p.tp1), p.tp99)) AS tsd
-  FROM agg a CROSS JOIN theme_rs_pct p
-  GROUP BY p.tp1, p.tp99
-),
 rets AS (
   SELECT s.sub_theme, p.ticker, p.date,
          SAFE_DIVIDE(p.adj_close, LAG(p.adj_close) OVER (PARTITION BY p.ticker ORDER BY p.date)) - 1 AS ret,
@@ -52,7 +41,7 @@ SELECT
   a.theme, a.members,
   ROUND(a.avg_dvol_atr,2) AS avg_dvol_atr,
   ROUND(a.std_dev,2)      AS std_dev,
-  ROUND(100/(1+EXP(-( LEAST(GREATEST(a.theme_rs_avg - 50, sc.tp1), sc.tp99) / NULLIF(sc.tsd,0) ))),0) AS theme_rs,
+  ROUND(PERCENT_RANK() OVER (ORDER BY a.theme_rs_avg) * 100, 0) AS theme_rs,
   ROUND(a.avg_group_score,4) AS avg_group_score,
   ROUND(a.ranking_spread,4)  AS ranking_spread,
   ROUND(SAFE_DIVIDE(a.ranking_spread,a.avg_group_score),4) AS spread_from_avg,
@@ -69,5 +58,4 @@ SELECT
          WHEN SAFE_DIVIDE(a.ranking_spread,a.avg_group_score)<1 THEN 0.8 ELSE 1 END, 4) AS lower_range,
   co.group_cohesion
 FROM agg a
-CROSS JOIN theme_rs_scale sc
 LEFT JOIN cohesion co ON co.theme = a.theme;
