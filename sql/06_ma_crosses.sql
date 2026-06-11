@@ -6,7 +6,6 @@ RETURNS ARRAY<FLOAT64> LANGUAGE js AS r"""
   for(var i=1;i<arr.length;i++){ e=arr[i]*k + e*(1-k); out.push(e); }
   return out;
 """;
-
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.ma_crosses` AS
 WITH px AS (
   SELECT ticker, date, adj_close,
@@ -25,7 +24,6 @@ arr AS (
     ARRAY_AGG(adj_close ORDER BY date) AS closes
   FROM px GROUP BY ticker
 ),
--- compute each EMA array ONCE per ticker, then line it up to dates by position
 ema_arrays AS (
   SELECT ticker, dates,
     ema_series(closes, 5)  AS e5,
@@ -63,21 +61,21 @@ flagged AS (
   WINDOW w AS (PARTITION BY ticker ORDER BY date)
 )
 SELECT ticker,
-  COALESCE(MIN(IF(a5  != p5,  rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_sma5,
+  COALESCE(MIN(IF(a5  != p5,  rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_sma5,
   ANY_VALUE(IF(rn=1, IF(a5=1,'Above','Below'), NULL))   AS cross_dir_sma5,
-  COALESCE(MIN(IF(a10 != p10, rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_sma10,
+  COALESCE(MIN(IF(a10 != p10, rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_sma10,
   ANY_VALUE(IF(rn=1, IF(a10=1,'Above','Below'), NULL))  AS cross_dir_sma10,
-  COALESCE(MIN(IF(a20 != p20, rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_sma20,
+  COALESCE(MIN(IF(a20 != p20, rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_sma20,
   ANY_VALUE(IF(rn=1, IF(a20=1,'Above','Below'), NULL))  AS cross_dir_sma20,
-  COALESCE(MIN(IF(a50 != p50, rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_sma50,
+  COALESCE(MIN(IF(a50 != p50, rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_sma50,
   ANY_VALUE(IF(rn=1, IF(a50=1,'Above','Below'), NULL))  AS cross_dir_sma50,
-  COALESCE(MIN(IF(a200 != p200, rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_sma200,
+  COALESCE(MIN(IF(a200 != p200, rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_sma200,
   ANY_VALUE(IF(rn=1, IF(a200=1,'Above','Below'), NULL)) AS cross_dir_sma200,
-  COALESCE(MIN(IF(e5  != pe5,  rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_ema5,
+  COALESCE(MIN(IF(e5  != pe5,  rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_ema5,
   ANY_VALUE(IF(rn=1, IF(e5=1,'Above','Below'), NULL))   AS cross_dir_ema5,
-  COALESCE(MIN(IF(e10 != pe10, rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_ema10,
+  COALESCE(MIN(IF(e10 != pe10, rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_ema10,
   ANY_VALUE(IF(rn=1, IF(e10=1,'Above','Below'), NULL))  AS cross_dir_ema10,
-  COALESCE(MIN(IF(e21 != pe21, rn, NULL)) - 1, ANY_VALUE(hist_len) - 1) AS days_since_cross_ema21,
+  COALESCE(MIN(IF(e21 != pe21, rn, NULL)), ANY_VALUE(hist_len)) AS days_since_cross_ema21,
   ANY_VALUE(IF(rn=1, IF(e21=1,'Above','Below'), NULL))  AS cross_dir_ema21
 FROM flagged
 GROUP BY ticker;
