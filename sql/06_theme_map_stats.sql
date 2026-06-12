@@ -60,7 +60,13 @@ SELECT
   mom.theme_flow_pctile_30d,               -- AZ Col52
   mom.theme_flow_pctile_90d,               -- BA Col53
   mom.theme_flow_pctile_180d,              -- BB Col54
-  mom.theme_flow_pctile_364d               -- BC Col55
+  mom.theme_flow_pctile_364d,              -- BC Col55
+  mom.etf_rank_today,                      -- BD Col56
+  mom.etf_rank_chg_7d,                     -- BE Col57
+  mom.etf_rank_chg_30d,                    -- BF Col58
+  mom.etf_rank_chg_90d,                    -- BG Col59
+  mom.etf_rank_chg_180d,                   -- BH Col60
+  mom.etf_rank_chg_364d                    -- BI Col61
 FROM `stonks-498420.stonks_data.theme_map` tm
 LEFT JOIN `stonks-498420.stonks_data.theme_stats` ts
   ON ts.theme = tm.sub_theme
