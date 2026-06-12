@@ -36,7 +36,7 @@ spy AS (
   WHERE ticker='SPY' AND date < CURRENT_DATE()
   QUALIFY date = (SELECT MAX(date) FROM piv)
 ),
-flow AS (                                  -- theme-level $vol + member returns (latest metrics_daily row per ticker)
+flow AS (
   SELECT
     s.sub_theme AS theme,
     AVG(m.avg_dollar_vol) AS theme_avg_dollar_vol,
@@ -77,7 +77,14 @@ calc AS (
     f.theme_avg_dollar_vol * f.avg_ret_1m  AS theme_flow_1m,
     f.theme_avg_dollar_vol * f.avg_ret_3m  AS theme_flow_3m,
     f.theme_avg_dollar_vol * f.avg_ret_6m  AS theme_flow_6m,
-    f.theme_avg_dollar_vol * f.avg_ret_12m AS theme_flow_12m
+    f.theme_avg_dollar_vol * f.avg_ret_12m AS theme_flow_12m,
+    -- per-day raw flow
+    (f.theme_avg_dollar_vol * f.avg_ret_1d)  / 1   AS theme_flow_day_1d,
+    (f.theme_avg_dollar_vol * f.avg_ret_1w)  / 7   AS theme_flow_day_7d,
+    (f.theme_avg_dollar_vol * f.avg_ret_1m)  / 30  AS theme_flow_day_30d,
+    (f.theme_avg_dollar_vol * f.avg_ret_3m)  / 90  AS theme_flow_day_90d,
+    (f.theme_avg_dollar_vol * f.avg_ret_6m)  / 180 AS theme_flow_day_180d,
+    (f.theme_avg_dollar_vol * f.avg_ret_12m) / 364 AS theme_flow_day_364d
   FROM piv p
   LEFT JOIN spy  s ON s.date = p.date
   LEFT JOIN flow f ON f.theme = p.theme
@@ -121,6 +128,26 @@ SELECT
   ROUND(theme_flow_3m,0)  AS theme_flow_3m,
   ROUND(theme_flow_6m,0)  AS theme_flow_6m,
   ROUND(theme_flow_12m,0) AS theme_flow_12m,
+  -- per-day raw flow (6)
+  ROUND(theme_flow_day_1d,0)   AS theme_flow_day_1d,
+  ROUND(theme_flow_day_7d,0)   AS theme_flow_day_7d,
+  ROUND(theme_flow_day_30d,0)  AS theme_flow_day_30d,
+  ROUND(theme_flow_day_90d,0)  AS theme_flow_day_90d,
+  ROUND(theme_flow_day_180d,0) AS theme_flow_day_180d,
+  ROUND(theme_flow_day_364d,0) AS theme_flow_day_364d,
+  -- flow acceleration deltas (5)
+  ROUND(theme_flow_day_1d   - theme_flow_day_7d,   0) AS theme_flow_accel_1dv7d,
+  ROUND(theme_flow_day_7d   - theme_flow_day_30d,  0) AS theme_flow_accel_7dv30d,
+  ROUND(theme_flow_day_30d  - theme_flow_day_90d,  0) AS theme_flow_accel_30dv90d,
+  ROUND(theme_flow_day_90d  - theme_flow_day_180d, 0) AS theme_flow_accel_90dv180d,
+  ROUND(theme_flow_day_180d - theme_flow_day_364d, 0) AS theme_flow_accel_180dv364d,
+  -- flow percentile ranks (6)
+  ROUND(PERCENT_RANK() OVER (ORDER BY theme_flow_1d)*100,0)  AS theme_flow_pctile_1d,
+  ROUND(PERCENT_RANK() OVER (ORDER BY theme_flow_1w)*100,0)  AS theme_flow_pctile_7d,
+  ROUND(PERCENT_RANK() OVER (ORDER BY theme_flow_1m)*100,0)  AS theme_flow_pctile_30d,
+  ROUND(PERCENT_RANK() OVER (ORDER BY theme_flow_3m)*100,0)  AS theme_flow_pctile_90d,
+  ROUND(PERCENT_RANK() OVER (ORDER BY theme_flow_6m)*100,0)  AS theme_flow_pctile_180d,
+  ROUND(PERCENT_RANK() OVER (ORDER BY theme_flow_12m)*100,0) AS theme_flow_pctile_364d,
   ( spy_ret_1d < 0 AND
     CASE
       WHEN (ma21 > ma21_prior) AND theme_rs_7d > 0 THEN 'Rising'
