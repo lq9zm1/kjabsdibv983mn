@@ -43,7 +43,24 @@ SELECT
   mom.theme_flow_1m,                       -- AI Col35
   mom.theme_flow_3m,                       -- AJ Col36
   mom.theme_flow_6m,                       -- AK Col37
-  mom.theme_flow_12m                       -- AL Col38
+  mom.theme_flow_12m,                      -- AL Col38
+  mom.theme_flow_day_1d,                   -- AM Col39
+  mom.theme_flow_day_7d,                   -- AN Col40
+  mom.theme_flow_day_30d,                  -- AO Col41
+  mom.theme_flow_day_90d,                  -- AP Col42
+  mom.theme_flow_day_180d,                 -- AQ Col43
+  mom.theme_flow_day_364d,                 -- AR Col44
+  mom.theme_flow_accel_1dv7d,              -- AS Col45
+  mom.theme_flow_accel_7dv30d,             -- AT Col46
+  mom.theme_flow_accel_30dv90d,            -- AU Col47
+  mom.theme_flow_accel_90dv180d,           -- AV Col48
+  mom.theme_flow_accel_180dv364d,          -- AW Col49
+  mom.theme_flow_pctile_1d,                -- AX Col50
+  mom.theme_flow_pctile_7d,                -- AY Col51
+  mom.theme_flow_pctile_30d,               -- AZ Col52
+  mom.theme_flow_pctile_90d,               -- BA Col53
+  mom.theme_flow_pctile_180d,              -- BB Col54
+  mom.theme_flow_pctile_364d               -- BC Col55
 FROM `stonks-498420.stonks_data.theme_map` tm
 LEFT JOIN `stonks-498420.stonks_data.theme_stats` ts
   ON ts.theme = tm.sub_theme
