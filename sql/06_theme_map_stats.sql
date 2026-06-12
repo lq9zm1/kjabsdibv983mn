@@ -30,7 +30,20 @@ SELECT
   mom.theme_bt_ma_rising,                  -- V  Col22
   mom.theme_pctile_7d,                     -- W  Col23
   mom.theme_today_pctile,                  -- X  Col24
-  mom.strength_in_weakness                 -- Y  Col25
+  mom.strength_in_weakness,                -- Y  Col25
+  mom.theme_rs_chg_1d,                     -- Z  Col26
+  mom.theme_rs_chg_1w,                     -- AA Col27
+  mom.theme_rs_chg_1m,                     -- AB Col28
+  mom.theme_rs_chg_3m,                     -- AC Col29
+  mom.theme_rs_chg_6m,                     -- AD Col30
+  mom.theme_rs_chg_12m,                    -- AE Col31
+  mom.theme_avg_dollar_vol,                -- AF Col32
+  mom.theme_flow_1d,                       -- AG Col33
+  mom.theme_flow_1w,                       -- AH Col34
+  mom.theme_flow_1m,                       -- AI Col35
+  mom.theme_flow_3m,                       -- AJ Col36
+  mom.theme_flow_6m,                       -- AK Col37
+  mom.theme_flow_12m                       -- AL Col38
 FROM `stonks-498420.stonks_data.theme_map` tm
 LEFT JOIN `stonks-498420.stonks_data.theme_stats` ts
   ON ts.theme = tm.sub_theme
