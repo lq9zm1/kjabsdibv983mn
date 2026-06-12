@@ -1,16 +1,34 @@
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.theme_map_stats` AS
+WITH etf_latest AS (                       -- latest-EOD ETF row only (kills fan-out)
+  SELECT ticker, rs_value_21d
+  FROM `stonks-498420.stonks_data.metrics_daily`
+  WHERE date < CURRENT_DATE()
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) = 1
+)
 SELECT
-  tm.sub_theme,
-  tm.main_theme,
-  tm.tickers,
-  tm.etf,
-  e.rs_value_21d        AS etf_rs,
-  ts.members,
-  ts.theme_rs,
-  ts.avg_group_score,
-  ts.group_cohesion
+  tm.sub_theme,                            -- A / Col1
+  tm.main_theme,                           -- B / Col2
+  tm.tickers,                              -- C / Col3
+  tm.etf,                                  -- D / Col4
+  e.rs_value_21d            AS etf_rs,      -- E / Col5
+  ts.members,                              -- F / Col6
+  ts.theme_rs,                             -- G / Col7
+  ts.avg_group_score,                      -- H / Col8
+  ts.group_cohesion,                       -- I / Col9
+  mom.theme_rs_trend,                      -- J / Col10
+  mom.theme_rs_1d,                         -- K / Col11
+  mom.theme_rs_3d,                         -- L / Col12
+  mom.theme_rs_7d,                         -- M / Col13
+  mom.theme_rs_14d,                        -- N / Col14
+  mom.theme_rs_wow,                        -- O / Col15
+  mom.theme_pctile_7d,                     -- P / Col16
+  mom.theme_bs_ratio_over_ma,              -- Q / Col17
+  mom.theme_bt_ma_rising,                  -- R / Col18
+  mom.strength_in_weakness                 -- S / Col19
 FROM `stonks-498420.stonks_data.theme_map` tm
 LEFT JOIN `stonks-498420.stonks_data.theme_stats` ts
   ON ts.theme = tm.sub_theme
-LEFT JOIN `stonks-498420.stonks_data.metrics_daily` e
-  ON e.ticker = tm.etf;
+LEFT JOIN etf_latest e
+  ON e.ticker = tm.etf
+LEFT JOIN `stonks-498420.stonks_data.theme_rs_score_momentum` mom
+  ON mom.theme = tm.sub_theme;
