@@ -36,6 +36,20 @@ spy AS (
   WHERE ticker='SPY' AND date < CURRENT_DATE()
   QUALIFY date = (SELECT MAX(date) FROM piv)
 ),
+flow AS (                                  -- theme-level $vol + member returns (latest metrics_daily row per ticker)
+  SELECT
+    s.sub_theme AS theme,
+    AVG(m.avg_dollar_vol) AS theme_avg_dollar_vol,
+    AVG(m.ret_1d)  AS avg_ret_1d,
+    AVG(m.ret_1w)  AS avg_ret_1w,
+    AVG(m.ret_1m)  AS avg_ret_1m,
+    AVG(m.ret_3m)  AS avg_ret_3m,
+    AVG(m.ret_6m)  AS avg_ret_6m,
+    AVG(m.ret_12m) AS avg_ret_12m
+  FROM `stonks-498420.stonks_data.stock_theme_map` s
+  JOIN `stonks-498420.stonks_data.metrics_daily` m USING (ticker)
+  GROUP BY s.sub_theme
+),
 calc AS (
   SELECT
     p.theme, p.date,
@@ -56,9 +70,17 @@ calc AS (
     p.rs_today - p.rs_126ago                              AS theme_rs_chg_6m,
     p.rs_today - p.rs_252ago                              AS theme_rs_chg_12m,
     p.ma21, p.ma21_prior,
-    s.spy_ret_1d
+    s.spy_ret_1d,
+    f.theme_avg_dollar_vol,
+    f.theme_avg_dollar_vol * f.avg_ret_1d  AS theme_flow_1d,
+    f.theme_avg_dollar_vol * f.avg_ret_1w  AS theme_flow_1w,
+    f.theme_avg_dollar_vol * f.avg_ret_1m  AS theme_flow_1m,
+    f.theme_avg_dollar_vol * f.avg_ret_3m  AS theme_flow_3m,
+    f.theme_avg_dollar_vol * f.avg_ret_6m  AS theme_flow_6m,
+    f.theme_avg_dollar_vol * f.avg_ret_12m AS theme_flow_12m
   FROM piv p
-  LEFT JOIN spy s ON s.date = p.date
+  LEFT JOIN spy  s ON s.date = p.date
+  LEFT JOIN flow f ON f.theme = p.theme
 )
 SELECT
   theme, date,
@@ -92,6 +114,13 @@ SELECT
   ROUND(theme_rs_chg_3m,2)  AS theme_rs_chg_3m,
   ROUND(theme_rs_chg_6m,2)  AS theme_rs_chg_6m,
   ROUND(theme_rs_chg_12m,2) AS theme_rs_chg_12m,
+  ROUND(theme_avg_dollar_vol,0) AS theme_avg_dollar_vol,
+  ROUND(theme_flow_1d,0)  AS theme_flow_1d,
+  ROUND(theme_flow_1w,0)  AS theme_flow_1w,
+  ROUND(theme_flow_1m,0)  AS theme_flow_1m,
+  ROUND(theme_flow_3m,0)  AS theme_flow_3m,
+  ROUND(theme_flow_6m,0)  AS theme_flow_6m,
+  ROUND(theme_flow_12m,0) AS theme_flow_12m,
   ( spy_ret_1d < 0 AND
     CASE
       WHEN (ma21 > ma21_prior) AND theme_rs_7d > 0 THEN 'Rising'
