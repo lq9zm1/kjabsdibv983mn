@@ -1,5 +1,5 @@
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.stock_rs_history`
-PARTITION BY date AS
+PARTITION BY DATE_TRUNC(date, MONTH) AS
 WITH spy AS (
   SELECT date, adj_close AS spy_close
   FROM `stonks-498420.stonks_data.price_history`
