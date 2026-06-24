@@ -143,7 +143,14 @@ def pull_and_load(pull_list):
     cfg = bigquery.LoadJobConfig(
         schema=schema,
         write_disposition="WRITE_TRUNCATE",
-        time_partitioning=bigquery.TimePartitioning(field="date"),
+        # CHANGED: month-grain partitioning. Day-grain caps at 4,000 partitions per
+        # load (and 10,000 per table); "max" history spans >4,000 trading days and
+        # blew past it. MONTH = ~550 partitions for 45yr. Same daily rows, same
+        # weekly resample — only the on-disk partition granularity changes.
+        time_partitioning=bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.MONTH,
+            field="date",
+        ),
         clustering_fields=["ticker"],
     )
     bq.load_table_from_dataframe(df, tbl("price_history"), job_config=cfg).result()
