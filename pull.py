@@ -19,7 +19,7 @@ from pathlib import Path
 import pandas as pd
 import yfinance as yf
 
-PERIOD    = "2y"
+PERIOD = "max"   # was "2y"
 CHUNK     = 20
 PAUSE_SEC = 2
 COLS = ["ticker", "date", "open", "high", "low", "close", "adj_close", "volume"]
