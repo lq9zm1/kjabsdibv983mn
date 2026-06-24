@@ -15,7 +15,7 @@ RETURNS FLOAT64 LANGUAGE js AS r"""
 """;
 
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.theme_rs_history`
-PARTITION BY date AS
+PARTITION BY DATE_TRUNC(date, MONTH) AS
 WITH member_ret AS (
   SELECT s.sub_theme, p.ticker, p.date,
     p.adj_close/NULLIF(LAG(p.adj_close) OVER (PARTITION BY p.ticker ORDER BY p.date),0)-1 AS ret
