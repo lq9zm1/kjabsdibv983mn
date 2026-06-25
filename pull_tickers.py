@@ -24,7 +24,7 @@ TABLE   = "tickers_raw"
 
 # ── TEST_MODE: start True (10 names, ~1 min) to validate fields.
 #    Flip to False for the full universe from tickers.txt.
-TEST_MODE  = True
+TEST_MODE  = False
 TEST_LIST  = ["BBVA", "NVO", "ASML", "KMB", "XOM", "HOOD", "MSFT", "V", "TSLA", "AMZN"]
 
 FIELDS = [
