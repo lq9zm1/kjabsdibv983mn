@@ -22,4 +22,4 @@ jobs:
       - name: Run tickers metadata pull
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
-        run: python pull_tickers.py
+        run: python pull_tickers_retry.py
