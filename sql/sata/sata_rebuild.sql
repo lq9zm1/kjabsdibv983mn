@@ -7,10 +7,13 @@
 --  Dependency order: UDFs -> base views -> band views -> v_sata_score.
 --
 --  NOTE: This pipeline is NOT part of the nightly job. The views auto-reflect
---  price_history / spx_raw on every query, so no nightly rebuild is needed for
+--  price_history / spx_daily on every query, so no nightly rebuild is needed for
 --  correctness. This file exists only so the definitions live in source control.
 --
---  Captured state: includes the 29-bar Volume warmup (band_02_volume).
+--  Captured state: includes the 29-bar Volume warmup (band_02_volume) AND the
+--  Mansfield cash-SPX fix (v6d): v_spx_weekly resamples the CASH index from
+--  spx_daily, and band_05_mansfield joins SAME-WEEK SPX with NO lag.
+--  Validated 100% vs the creator (ADBE/MSFT/WMT) across full history.
 -- ============================================================================
 
 
@@ -167,12 +170,19 @@ SELECT *, ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY wk) AS wk_index
 FROM weekly;
 
 
--- v_spx_weekly: 1:1 passthrough of spx_raw (weekly) -> Monday week + close.
+-- v_spx_weekly: Monday-anchored weekly CASH-SPX close, resampled from spx_daily.
+-- v6d FIX: spx_daily MUST hold TVC:SPX cash (TVC_SPX__1D load) — NOT SPCFD, NO lag.
+-- (SPCFD + a phantom 1-week lag was the old double-bug that broke Mansfield;
+--  never reintroduce either.)
 CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_spx_weekly` AS
 SELECT
-  DATE_TRUNC(DATE(TIMESTAMP_SECONDS(time)), WEEK(MONDAY)) AS wk,
-  close AS spx_close
-FROM `stonks-498420.stonks_data.spx_raw`;
+  DATE_TRUNC(dt, WEEK(MONDAY)) AS wk,
+  ARRAY_AGG(close ORDER BY dt DESC LIMIT 1)[OFFSET(0)] AS spx_close   -- last close of week
+FROM (
+  SELECT DATE(TIMESTAMP_SECONDS(`time`)) AS dt, close
+  FROM `stonks-498420.stonks_data.spx_daily`
+)
+GROUP BY wk;
 
 
 -- ========================= 3. BAND VIEWS ====================================
@@ -263,15 +273,15 @@ SELECT ticker, wk, close, channel_hh_13w, channel_ll_13w,
 FROM b;
 
 
--- Row 5 — Mansfield RS (close/SPX vs 52W avg; SPX LAGGED 1 week).
+-- Row 5 — Mansfield RS (close/SPX vs 52W avg).
+-- v6d FIX: SAME-WEEK cash SPX, NO lag. (Old version lagged SPX 1 week via LAG()
+--  on a SPCFD feed — that double-bug caused ~3% razor-thin off-by-1 flips.)
 CREATE OR REPLACE VIEW `stonks-498420.stonks_data.band_05_mansfield` AS
-WITH spx AS (
-  SELECT wk, LAG(spx_close) OVER (ORDER BY wk) AS spx_lag1
-  FROM `stonks-498420.stonks_data.v_spx_weekly`
-),
-j AS (
-  SELECT eq.ticker, eq.wk, SAFE_DIVIDE(eq.close, spx.spx_lag1)*100 AS ratio
-  FROM `stonks-498420.stonks_data.v_sata_weekly` eq JOIN spx USING (wk)
+WITH j AS (
+  SELECT eq.ticker, eq.wk,
+    SAFE_DIVIDE(eq.close, spx.spx_close)*100 AS ratio
+  FROM `stonks-498420.stonks_data.v_sata_weekly` eq
+  LEFT JOIN `stonks-498420.stonks_data.v_spx_weekly` spx USING (wk)   -- SAME WEEK, no lag
 ),
 m AS (
   SELECT ticker, wk, ratio,
