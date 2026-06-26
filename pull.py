@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
 """
-pull.py
-Stability-patched Yahoo Finance price puller.
-- threads OFF, small batches, pauses, fresh tz cache, single-threaded retry.
+pull.py  —  EODHD full-history price puller (drop-in replacement for the yfinance version).
+
 Returns a DataFrame matching the BigQuery price_history schema:
     ticker, date, open, high, low, close, adj_close, volume
 
-Can be imported (pull_prices(tickers)) or run standalone (reads tickers.txt,
-writes price_history.csv).
+Contract preserved for run_nightly.py:
+    pull_prices(tickers) -> (DataFrame, failed_list)
+    to_yahoo(t)          -> EODHD symbol mapper (kept same name so run_nightly's
+                            metadata step `yf.Ticker(pullmod.to_yahoo(t))` still calls it;
+                            see NOTE at bottom about the .info metadata step)
+
+KEY DIFFERENCES vs yfinance:
+  - One EODHD call per ticker = full history (period=d). ~3,062 calls/night = ~3% of
+    the 100,000/day limit. (Bulk-last-day incremental is a LATER optimization.)
+  - EODHD adjusted_close is split+dividend adjusted (matches TradingView). We map it
+    to adj_close. EODHD 'close' is the raw/unadjusted close -> close.
+  - US tickers use the .US suffix. Dotted tickers (BRK.B) -> BRK-B.US on EODHD.
+
+SETUP:
+  - requires: requests, pandas
+  - API key from env var EODHD_API_KEY  (GitHub Actions secret), falls back to a
+    local constant for manual runs.
 """
 
 import os
@@ -17,97 +31,101 @@ import time
 from pathlib import Path
 
 import pandas as pd
-import yfinance as yf
+import requests
 
-PERIOD = "max"
-CHUNK     = 20
-PAUSE_SEC = 2
+# ---- config -----------------------------------------------------------------
+# Key resolution order: env var (GitHub Actions secret) -> local constant.
+EODHD_API_KEY = os.environ.get("EODHD_API_KEY", "PASTE_KEY_FOR_LOCAL_RUNS")
+BASE = "https://eodhd.com/api/eod"
+FROM = "1900-01-01"            # full history; EODHD returns from inception
+PAUSE_SEC = 0.05              # gentle spacing; 1000 req/min limit = 16/s, this is well under
+TIMEOUT = 60
+RETRY = 2                      # per-ticker retries on transient errors
 COLS = ["ticker", "date", "open", "high", "low", "close", "adj_close", "volume"]
 
 
 def to_yahoo(t: str) -> str:
-    return t.replace(".", "-")
+    """EODHD symbol for a US ticker. (Name kept for run_nightly compatibility.)
+    BRK.B -> BRK-B.US ; dotted/class shares use '-' like Yahoo, plus '.US' exchange."""
+    return t.replace(".", "-") + ".US"
 
 
-def _chunks(lst, n):
-    for i in range(0, len(lst), n):
-        yield lst[i:i + n]
+def _pull_one(eod_symbol):
+    """Return list-of-dict rows for one EODHD symbol, or None on failure."""
+    url = f"{BASE}/{eod_symbol}"
+    params = {"api_token": EODHD_API_KEY, "from": FROM, "period": "d", "fmt": "json"}
+    for attempt in range(RETRY + 1):
+        try:
+            r = requests.get(url, params=params, timeout=TIMEOUT)
+            if r.status_code == 200:
+                data = r.json()
+                return data if isinstance(data, list) else []
+            # 404 = symbol not on EODHD; don't retry
+            if r.status_code == 404:
+                return None
+            # 429/5xx = transient; back off and retry
+            time.sleep(0.5 * (attempt + 1))
+        except Exception:
+            time.sleep(0.5 * (attempt + 1))
+    return None
 
 
-def _row_frame(sub, original_ticker):
-    df = sub.reset_index()[
-        ["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]
-    ].copy()
-    df.columns = ["date", "open", "high", "low", "close", "adj_close", "volume"]
-    df.insert(0, "ticker", original_ticker)
-    df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-    return df
+def _frame(rows, original_ticker):
+    """EODHD JSON rows -> price_history-schema DataFrame for one ticker."""
+    recs = []
+    for bar in rows:
+        try:
+            recs.append({
+                "ticker":    original_ticker,
+                "date":      bar["date"],                       # 'YYYY-MM-DD'
+                "open":      float(bar["open"]),
+                "high":      float(bar["high"]),
+                "low":       float(bar["low"]),
+                "close":     float(bar["close"]),               # raw close
+                "adj_close": float(bar["adjusted_close"]),      # split+div adjusted (TV-match)
+                "volume":    bar.get("volume", 0),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+    if not recs:
+        return None
+    return pd.DataFrame.from_records(recs)
 
 
 def pull_prices(tickers):
-    """Pull OHLCV for a list of (already-cleaned) ticker strings.
-    Returns (DataFrame, failed_list)."""
-    try:
-        os.makedirs("./.yf_cache", exist_ok=True)
-        yf.set_tz_cache_location("./.yf_cache")
-    except Exception:
-        pass
+    """Pull full-history OHLCV for a list of (already-cleaned) ticker strings.
+    Returns (DataFrame, failed_list_of_original_tickers)."""
+    if EODHD_API_KEY in ("", "PASTE_KEY_FOR_LOCAL_RUNS") and "EODHD_API_KEY" not in os.environ:
+        print("WARNING: EODHD_API_KEY not set (env var or local constant). Calls will 401.",
+              flush=True)
 
-    ymap = {to_yahoo(t): t for t in tickers}          # yahoo symbol -> original
+    emap = {to_yahoo(t): t for t in tickers}     # eodhd symbol -> original ticker
     frames, failed = [], []
-    batches = list(_chunks(list(ymap.keys()), CHUNK))
-    total = len(batches)
+    syms = list(emap.keys())
+    total = len(syms)
 
-    for bi, batch in enumerate(batches, 1):
-        print(f"  batch {bi}/{total} ...", flush=True)
-        try:
-            data = yf.download(
-                batch, period=PERIOD, interval="1d",
-                auto_adjust=False, group_by="ticker",
-                threads=False, progress=False,
-            )
-        except Exception as e:
-            print("  batch error:", e)
-            failed += batch
-            continue
-        for ysym in batch:
-            try:
-                sub = data if len(batch) == 1 else data[ysym]
-                sub = sub.dropna(how="all")
-                if sub.empty:
-                    failed.append(ysym); continue
-                frames.append(_row_frame(sub, ymap[ysym]))
-            except Exception:
-                failed.append(ysym)
+    BATCH_LOG = max(1, total // 100)             # ~100 progress lines like the old batches
+    for i, esym in enumerate(syms, 1):
+        if i % BATCH_LOG == 0 or i == total:
+            print(f"  {i}/{total} ...", flush=True)
+        rows = _pull_one(esym)
+        if rows is None:
+            failed.append(esym); continue
+        fr = _frame(rows, emap[esym])
+        if fr is None or fr.empty:
+            failed.append(esym); continue
+        frames.append(fr)
         time.sleep(PAUSE_SEC)
 
-    # single-threaded retry pass (catches batch-mode drops)
-    ok = set()
-    if failed:
-        retry = sorted(set(failed)); failed = []
-        print(f"Retrying {len(retry)} symbols individually...", flush=True)
-        for ysym in retry:
-            try:
-                sub = yf.download(ysym, period=PERIOD, interval="1d",
-                                  auto_adjust=False, threads=False,
-                                  progress=False).dropna(how="all")
-                if sub.empty:
-                    failed.append(ysym); continue
-                frames.append(_row_frame(sub, ymap[ysym]))
-                ok.add(ysym)
-            except Exception:
-                failed.append(ysym)
-            time.sleep(0.5)
-
     if not frames:
-        return pd.DataFrame(columns=COLS), sorted(set(failed))
+        return pd.DataFrame(columns=COLS), sorted({emap.get(f, f) for f in set(failed)})
 
     out = pd.concat(frames, ignore_index=True)
     out = out.dropna(subset=["close"])
-    out["volume"] = out["volume"].fillna(0).astype("int64")
+    out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
+    out["volume"] = pd.to_numeric(out["volume"], errors="coerce").fillna(0).astype("int64")
     out = out[COLS]
-    # map failed yahoo symbols back to original tickers for the caller
-    failed_orig = sorted({ymap.get(f, f) for f in set(failed)})
+    failed_orig = sorted({emap.get(f, f) for f in set(failed)})
     return out, failed_orig
 
 
@@ -128,4 +146,5 @@ if __name__ == "__main__":
     df.to_csv("price_history.csv", index=False)
     print(f"\nWrote {len(df):,} rows for {df['ticker'].nunique()} tickers -> price_history.csv")
     if failed:
-        print(f"{len(failed)} symbols returned no data: " + ", ".join(failed))
+        print(f"{len(failed)} symbols returned no data: " + ", ".join(failed[:50])
+              + (" ..." if len(failed) > 50 else ""))
