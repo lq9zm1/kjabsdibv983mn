@@ -29,4 +29,5 @@ jobs:
       - name: Run nightly ingestion + rebuilds
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: python run_nightly.py
