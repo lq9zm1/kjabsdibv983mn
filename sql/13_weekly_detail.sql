@@ -1,7 +1,8 @@
 -- 13_weekly_detail.sql
 -- Weekly per-ticker fields for dashboard parity with the sas export. One row per ticker-week.
--- Includes: weekly OHLCV, 10/30/40W MAs (+ %to + above flags), Donchian channels
---   (HH/LL/HC/LC at 52/26/13/4W), weekly dollar-volume family, single-source Mansfield.
+-- Includes: weekly OHLCV, 10/30/40W MAs (+%to+flags), Donchian channels (52/26/13/4W),
+--   weekly dollar-volume family, last S2/S4 entry price + % since, single-source Mansfield.
+-- Reads stage_engine (built by 12, runs before this) for the S2A/S4A anchors.
 -- Runs nightly after sata_score (11 -> 12 -> 13).
 
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.weekly_detail` CLUSTER BY ticker AS
@@ -25,29 +26,46 @@ WITH w AS (
     c26 AS (PARTITION BY ticker ORDER BY wk ROWS BETWEEN 25 PRECEDING AND CURRENT ROW),
     c13 AS (PARTITION BY ticker ORDER BY wk ROWS BETWEEN 12 PRECEDING AND CURRENT ROW),
     c04 AS (PARTITION BY ticker ORDER BY wk ROWS BETWEEN  3 PRECEDING AND CURRENT ROW)
+),
+joined AS (
+  SELECT w.*, se.broad_stage, se.wks_since
+  FROM w
+  LEFT JOIN `stonks-498420.stonks_data.stage_engine` se USING (ticker, wk)
+),
+lvl AS (
+  SELECT *,
+    LAST_VALUE(IF(broad_stage='S2' AND wks_since=1, close, NULL) IGNORE NULLS)
+      OVER (PARTITION BY ticker ORDER BY wk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS last_s2_px,
+    LAST_VALUE(IF(broad_stage='S4' AND wks_since=1, close, NULL) IGNORE NULLS)
+      OVER (PARTITION BY ticker ORDER BY wk ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS last_s4_px
+  FROM joined
 )
 SELECT
-  w.ticker, w.wk,
-  w.close  AS close_w,
-  w.high   AS high_w,
-  w.low    AS low_w,
-  w.volume AS volume_w,
-  CASE WHEN w.n10>=10 THEN w.sma10 END AS sma_10w,
-  CASE WHEN w.n30>=30 THEN w.sma30 END AS sma_30w,
-  CASE WHEN w.n40>=40 THEN w.sma40 END AS sma_40w,
-  CASE WHEN w.n10>=10 THEN ROUND((w.close/NULLIF(w.sma10,0)-1)*100,2) END AS pct_to_10w,
-  CASE WHEN w.n30>=30 THEN ROUND((w.close/NULLIF(w.sma30,0)-1)*100,2) END AS pct_to_30w,
-  CASE WHEN w.n40>=40 THEN ROUND((w.close/NULLIF(w.sma40,0)-1)*100,2) END AS pct_to_40w,
-  CASE WHEN w.n10>=10 THEN CAST(w.close > w.sma10 AS INT64) END AS abv_10w,
-  CASE WHEN w.n30>=30 THEN CAST(w.close > w.sma30 AS INT64) END AS abv_30w,
-  CASE WHEN w.n40>=40 THEN CAST(w.close > w.sma40 AS INT64) END AS abv_40w,
-  ROUND(w.hh52,2) AS channel_hh_52w, ROUND(w.ll52,2) AS channel_ll_52w, ROUND(w.hc52,2) AS channel_hc_52w, ROUND(w.lc52,2) AS channel_lc_52w,
-  ROUND(w.hh26,2) AS channel_hh_26w, ROUND(w.ll26,2) AS channel_ll_26w, ROUND(w.hc26,2) AS channel_hc_26w, ROUND(w.lc26,2) AS channel_lc_26w,
-  ROUND(w.hh13,2) AS channel_hh_13w, ROUND(w.ll13,2) AS channel_ll_13w, ROUND(w.hc13,2) AS channel_hc_13w, ROUND(w.lc13,2) AS channel_lc_13w,
-  ROUND(w.hh04,2) AS channel_hh_4w,  ROUND(w.ll04,2) AS channel_ll_4w,  ROUND(w.hc04,2) AS channel_hc_4w,  ROUND(w.lc04,2) AS channel_lc_4w,
-  ROUND(w.dvol, 0) AS dollar_vol_w,
-  CASE WHEN w.n10>=10 THEN ROUND(w.advol10, 0) END AS avg_dollar_vol_10w,
-  CASE WHEN w.n10>=10 THEN ROUND(SAFE_DIVIDE(w.dvol, w.advol10), 2) END AS rel_vol_w,
+  lvl.ticker, lvl.wk,
+  lvl.close  AS close_w,
+  lvl.high   AS high_w,
+  lvl.low    AS low_w,
+  lvl.volume AS volume_w,
+  CASE WHEN lvl.n10>=10 THEN lvl.sma10 END AS sma_10w,
+  CASE WHEN lvl.n30>=30 THEN lvl.sma30 END AS sma_30w,
+  CASE WHEN lvl.n40>=40 THEN lvl.sma40 END AS sma_40w,
+  CASE WHEN lvl.n10>=10 THEN ROUND((lvl.close/NULLIF(lvl.sma10,0)-1)*100,2) END AS pct_to_10w,
+  CASE WHEN lvl.n30>=30 THEN ROUND((lvl.close/NULLIF(lvl.sma30,0)-1)*100,2) END AS pct_to_30w,
+  CASE WHEN lvl.n40>=40 THEN ROUND((lvl.close/NULLIF(lvl.sma40,0)-1)*100,2) END AS pct_to_40w,
+  CASE WHEN lvl.n10>=10 THEN CAST(lvl.close > lvl.sma10 AS INT64) END AS abv_10w,
+  CASE WHEN lvl.n30>=30 THEN CAST(lvl.close > lvl.sma30 AS INT64) END AS abv_30w,
+  CASE WHEN lvl.n40>=40 THEN CAST(lvl.close > lvl.sma40 AS INT64) END AS abv_40w,
+  ROUND(lvl.hh52,2) AS channel_hh_52w, ROUND(lvl.ll52,2) AS channel_ll_52w, ROUND(lvl.hc52,2) AS channel_hc_52w, ROUND(lvl.lc52,2) AS channel_lc_52w,
+  ROUND(lvl.hh26,2) AS channel_hh_26w, ROUND(lvl.ll26,2) AS channel_ll_26w, ROUND(lvl.hc26,2) AS channel_hc_26w, ROUND(lvl.lc26,2) AS channel_lc_26w,
+  ROUND(lvl.hh13,2) AS channel_hh_13w, ROUND(lvl.ll13,2) AS channel_ll_13w, ROUND(lvl.hc13,2) AS channel_hc_13w, ROUND(lvl.lc13,2) AS channel_lc_13w,
+  ROUND(lvl.hh04,2) AS channel_hh_4w,  ROUND(lvl.ll04,2) AS channel_ll_4w,  ROUND(lvl.hc04,2) AS channel_hc_4w,  ROUND(lvl.lc04,2) AS channel_lc_4w,
+  ROUND(lvl.dvol, 0) AS dollar_vol_w,
+  CASE WHEN lvl.n10>=10 THEN ROUND(lvl.advol10, 0) END AS avg_dollar_vol_10w,
+  CASE WHEN lvl.n10>=10 THEN ROUND(SAFE_DIVIDE(lvl.dvol, lvl.advol10), 2) END AS rel_vol_w,
+  ROUND(lvl.last_s2_px, 2) AS last_s2_price,
+  CASE WHEN lvl.last_s2_px IS NOT NULL THEN ROUND((lvl.close/lvl.last_s2_px - 1)*100, 2) END AS pct_since_s2,
+  ROUND(lvl.last_s4_px, 2) AS last_s4_price,
+  CASE WHEN lvl.last_s4_px IS NOT NULL THEN ROUND((lvl.close/lvl.last_s4_px - 1)*100, 2) END AS pct_since_s4,
   m5.mansfield_line AS mansfield_w
-FROM w
+FROM lvl
 LEFT JOIN `stonks-498420.stonks_data.band_05_mansfield` m5 USING (ticker, wk);
