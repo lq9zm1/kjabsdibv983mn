@@ -1,11 +1,11 @@
 -- 12_stage_engine.sql
--- Broad stage (S2/Neutral/S4) + resolved substage + came-from + weeks-since-anchor.
+-- Broad stage (S2/Neutral/S4) + resolved substage + came-from + weeks-since-anchor
+--   + stage_changed / substage_changed (vs prior week).
 -- Reads the sata_score TABLE (built by 11_sata_score.sql, runs immediately before).
 -- Self-contained: defines the UDF and builds the table. Idempotent (CREATE OR REPLACE).
--- Validated vs stageanalysis.net 2026-06-08: broad 88.57%, substage 88.49% (agreeing),
---   end-to-end 79.94%. The ~89% broad ceiling is a proven OHLCV-information limit.
+-- Validated vs stageanalysis.net: broad ~86-89% (proven OHLCV ceiling), direction near-perfect.
 --
--- Clock rule (validated 50.2% vs sas's published Wks Since, beating reset-on-reentry 32.4%):
+-- Clock rule (validated 50% vs sas Wks Since, beats reset-on-reentry 32%):
 --   wks_since resets to 1 (new "A") ONLY on a lineage flip S2<->S4; Neutral keeps the
 --   prior lineage and keeps counting (sas Neutral clock reaches 190 -> persists through N).
 
@@ -15,8 +15,8 @@ RETURNS ARRAY<STRUCT<broad STRING, came_from STRING, wks_since INT64>> LANGUAGE 
   var n = scores.length;
   var out = [];
   var st = "N";
-  var lineage = null;   // last non-Neutral broad stage
-  var clock = 0;        // weeks since current lineage anchor
+  var lineage = null;
+  var clock = 0;
   for (var i = 0; i < n; i++){
     if (Number(valids[i]) === 1){
       var s = Number(scores[i]);
@@ -77,17 +77,23 @@ flat AS (
     w[OFFSET(i)].wks_since AS wks_since,
     r7s[OFFSET(i)]         AS row7
   FROM calc, UNNEST(GENERATE_ARRAY(0, ARRAY_LENGTH(wks) - 1)) AS i
+),
+labeled AS (
+  SELECT ticker, wk, broad_stage, came_from, wks_since,
+    CASE
+      WHEN broad_stage = 'S2' THEN CONCAT('2',
+           CASE WHEN wks_since = 1 THEN 'A' WHEN wks_since >= 41 THEN 'B' ELSE '' END,
+           CASE WHEN row7 = -1 THEN '-' ELSE '' END)
+      WHEN broad_stage = 'S4' THEN CONCAT('4',
+           CASE WHEN wks_since = 1 THEN 'A' WHEN wks_since >= 41 THEN 'B' ELSE '' END,
+           CASE WHEN row7 =  1 THEN '-' ELSE '' END)
+      WHEN broad_stage = 'N' AND came_from = 'S2' THEN '3'
+      WHEN broad_stage = 'N' AND came_from = 'S4' THEN '1'
+      ELSE 'N'
+    END AS stage
+  FROM flat
 )
-SELECT ticker, wk, broad_stage, came_from, wks_since,
-  CASE
-    WHEN broad_stage = 'S2' THEN CONCAT('2',
-         CASE WHEN wks_since = 1 THEN 'A' WHEN wks_since >= 41 THEN 'B' ELSE '' END,
-         CASE WHEN row7 = -1 THEN '-' ELSE '' END)
-    WHEN broad_stage = 'S4' THEN CONCAT('4',
-         CASE WHEN wks_since = 1 THEN 'A' WHEN wks_since >= 41 THEN 'B' ELSE '' END,
-         CASE WHEN row7 =  1 THEN '-' ELSE '' END)
-    WHEN broad_stage = 'N' AND came_from = 'S2' THEN '3'
-    WHEN broad_stage = 'N' AND came_from = 'S4' THEN '1'
-    ELSE 'N'
-  END AS stage
-FROM flat;
+SELECT ticker, wk, broad_stage, came_from, wks_since, stage,
+  broad_stage <> LAG(broad_stage) OVER (PARTITION BY ticker ORDER BY wk) AS stage_changed,
+  stage       <> LAG(stage)       OVER (PARTITION BY ticker ORDER BY wk) AS substage_changed
+FROM labeled;
