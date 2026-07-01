@@ -18,7 +18,7 @@ stg AS (
   FROM entries e
   LEFT JOIN `stonks-498420.stonks_data.stage_engine` se
     ON se.ticker = e.ticker
-   AND DATE(se.wk) < DATE_TRUNC(e.entry_date, WEEK(MONDAY))
+   AND DATE(se.wk) < DATE_TRUNC(DATE(e.entry_date), WEEK(MONDAY))
   QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ticker, e.entry_date ORDER BY se.wk DESC) = 1
 ),
 -- SATA score + week-over-week rising flag
@@ -34,7 +34,7 @@ man AS (
   FROM `stonks-498420.stonks_data.weekly_detail`
 )
 SELECT
-  e.ticker, e.entry_date, e.close, e.pct_to_21ema,
+  e.ticker, DATE(e.entry_date) AS entry_date, e.close, e.pct_to_21ema,
   e.days_since_bo_daily, e.days_since_bo_weekly, e.bo_daily, e.bo_weekly,
   -- stage (tags for filtering, not hard-coded)
   CASE WHEN stg.broad_stage = 'N' THEN 'Neutral' ELSE stg.broad_stage END AS broad_stage,
@@ -51,4 +51,4 @@ LEFT JOIN stg USING (ticker, entry_date)
 LEFT JOIN sat ON sat.ticker = e.ticker AND sat.wk = stg.stage_week
 LEFT JOIN man ON man.ticker = e.ticker AND man.wk = stg.stage_week
 LEFT JOIN `stonks-498420.stonks_data.gap_history` g
-  ON g.ticker = e.ticker AND g.date = e.entry_date AND g.tf = 'D';
+  ON g.ticker = e.ticker AND DATE(g.date) = DATE(e.entry_date) AND g.tf = 'D';
