@@ -31,7 +31,7 @@ FEAT_TABLE = f"{PROJECT}.{DATASET}.pocket_pivot_features"
 FEATURE_COLS = [
     "ticker", "date", "close", "volume", "sma10", "sma50", "up_day",
     "down_vol_max", "vol_ratio", "dist_ma_pct", "upper_half",
-    "force_index", "fi_positive", "pocket_pivot", "pp_type",
+    "force_index", "fi_positive", "atr_pct", "vcp_tight", "pocket_pivot", "pp_type",
 ]
 
 
