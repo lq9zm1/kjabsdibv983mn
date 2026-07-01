@@ -36,21 +36,31 @@ FEATURE_COLS = [
     "nearest_support_top", "nearest_support_bottom", "pct_to_support",
     "nearest_resistance_bottom", "nearest_resistance_top", "pct_to_resistance",
     "days_since_gap_up", "days_since_gap_down",
+    # --- gap-type flags on the nearest zone ---
+    "nearest_support_base", "nearest_support_shakeout", "nearest_support_wedge_pop", "nearest_support_earnings",
+    "nearest_resistance_base", "nearest_resistance_shakeout", "nearest_resistance_wedge_pop", "nearest_resistance_earnings",
+    # --- per-type counts of nearby (+/-25%) zones ---
+    "near_support_base_n", "near_support_shakeout_n", "near_support_wedge_pop_n", "near_support_earnings_n",
+    "near_resistance_base_n", "near_resistance_shakeout_n", "near_resistance_wedge_pop_n", "near_resistance_earnings_n",
 ]
 
 
 def adjust_ohlc(g):
-    """Return date+OHLC, split+div adjusted if ADJUST else raw."""
+    """Return date+OHLC (+volume), split+div adjusted if ADJUST else raw."""
     if not ADJUST:
-        return g[["date", "open", "high", "low", "close"]].copy()
-    f = (g["adj_close"] / g["close"]).where(g["close"] > 0, 1.0)
-    return pd.DataFrame({
-        "date":  g["date"],
-        "open":  g["open"]  * f,
-        "high":  g["high"]  * f,
-        "low":   g["low"]   * f,
-        "close": g["adj_close"],     # == close * f
-    })
+        out = g[["date", "open", "high", "low", "close"]].copy()
+    else:
+        f = (g["adj_close"] / g["close"]).where(g["close"] > 0, 1.0)
+        out = pd.DataFrame({
+            "date":  g["date"],
+            "open":  g["open"]  * f,
+            "high":  g["high"]  * f,
+            "low":   g["low"]   * f,
+            "close": g["adj_close"],     # == close * f
+        })
+    if "volume" in g.columns:
+        out["volume"] = g["volume"].values   # raw volume (for the earnings vol ratio)
+    return out
 
 
 def compute_ticker(tkr, g):
