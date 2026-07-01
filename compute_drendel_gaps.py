@@ -87,7 +87,11 @@ def main():
         ORDER BY ticker, date
     """
     print("Reading price_history ...")
-    df = client.query(sql).result().to_dataframe(create_bqstorage_client=False)
+    try:
+        df = client.query(sql).result().to_dataframe(create_bqstorage_client=True)
+    except Exception as e:
+        print(f"  Storage API unavailable ({type(e).__name__}); using standard read.")
+        df = client.query(sql).result().to_dataframe(create_bqstorage_client=False)
     print(f"  {len(df):,} rows, {df['ticker'].nunique():,} tickers")
 
     hist_buf, feat_all = [], []
