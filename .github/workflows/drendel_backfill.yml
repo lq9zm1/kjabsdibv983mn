@@ -1,0 +1,22 @@
+name: drendel-backfill
+on:
+  workflow_dispatch: {}
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Write BigQuery service-account key
+        run: echo '${{ secrets.GCP_SA_KEY }}' > "$HOME/key.json"
+      - name: Run Drendel gap backfill (full history, D+W)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
+        run: python compute_drendel_gaps.py
