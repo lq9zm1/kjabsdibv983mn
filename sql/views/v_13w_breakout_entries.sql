@@ -18,7 +18,7 @@ stg AS (
   FROM entries e
   LEFT JOIN `stonks-498420.stonks_data.stage_engine` se
     ON se.ticker = e.ticker
-   AND se.wk < DATE_TRUNC(e.entry_date, WEEK(MONDAY))
+   AND DATE(se.wk) < DATE_TRUNC(e.entry_date, WEEK(MONDAY))
   QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ticker, e.entry_date ORDER BY se.wk DESC) = 1
 ),
 -- SATA score + week-over-week rising flag
