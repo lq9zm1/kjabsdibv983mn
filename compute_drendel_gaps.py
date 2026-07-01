@@ -9,8 +9,10 @@ Writes: stonks_data.gap_features   (latest row per ticker per timeframe -> dashb
 Prices are SPLIT+DIVIDEND ADJUSTED (factor = adj_close/close applied to O/H/L) so
 historical splits do not create false gaps. Set ADJUST=False for raw OHLC.
 
+History is written in batches of BATCH_TICKERS to keep memory low on CI runners.
+
 Run: python compute_drendel_gaps.py
-Requires: pandas, google-cloud-bigquery, google-cloud-bigquery-storage
+Requires: pandas, google-cloud-bigquery  (google-cloud-bigquery-storage optional, faster read)
 """
 import pandas as pd
 from google.cloud import bigquery
@@ -20,6 +22,10 @@ PROJECT = "stonks-498420"
 DATASET = "stonks_data"
 ADJUST  = True          # split+div adjust OHLC (recommended for history). False = raw.
 MIN_BARS = 2            # skip tickers with fewer than this many bars
+BATCH_TICKERS = 500     # flush gap_history to BQ every N tickers (memory cap)
+
+HIST_TABLE = f"{PROJECT}.{DATASET}.gap_history"
+FEAT_TABLE = f"{PROJECT}.{DATASET}.gap_features"
 
 FEATURE_COLS = [
     "ticker", "tf", "date", "close",
@@ -53,15 +59,13 @@ def compute_ticker(tkr, g):
     px = adjust_ohlc(g)
     hist_frames, feat_frames = [], []
 
-    # daily
-    _, hD, _, _ = run_drendel(px)
+    _, hD, _, _ = run_drendel(px)          # daily
     hD["ticker"] = tkr
     hD["tf"] = "D"
     hist_frames.append(hD)
     feat_frames.append(hD.iloc[[-1]].copy())
 
-    # weekly
-    w = resample_weekly(px)
+    w = resample_weekly(px)                # weekly
     if len(w) >= MIN_BARS:
         _, hW, _, _ = run_drendel(w)
         hW["ticker"] = tkr
@@ -82,48 +86,57 @@ def main():
         ORDER BY ticker, date
     """
     print("Reading price_history ...")
-    df = client.query(sql).result().to_dataframe(create_bqstorage_client=True)
+    df = client.query(sql).result().to_dataframe()   # uses Storage API if installed
     print(f"  {len(df):,} rows, {df['ticker'].nunique():,} tickers")
 
-    hist_all, feat_all = [], []
-    for i, (tkr, g) in enumerate(df.groupby("ticker", sort=False)):
+    hist_buf, feat_all = [], []
+    first_write = True
+    processed = 0
+
+    def flush_history():
+        nonlocal hist_buf, first_write
+        if not hist_buf:
+            return
+        chunk = pd.concat(hist_buf, ignore_index=True)[FEATURE_COLS]
+        chunk["date"] = pd.to_datetime(chunk["date"])
+        client.load_table_from_dataframe(
+            chunk, HIST_TABLE,
+            job_config=bigquery.LoadJobConfig(
+                write_disposition="WRITE_TRUNCATE" if first_write else "WRITE_APPEND",
+                time_partitioning=bigquery.TimePartitioning(field="date", type_="MONTH"),
+                clustering_fields=["ticker", "tf"],
+            ),
+        ).result()
+        first_write = False
+        hist_buf = []
+
+    for tkr, g in df.groupby("ticker", sort=False):
         if len(g) < MIN_BARS:
             continue
         try:
             h, f = compute_ticker(tkr, g)
-            hist_all.append(h)
+            hist_buf.append(h)
             feat_all.append(f)
         except Exception as e:
             print(f"  !! {tkr}: {e}")
-        if (i + 1) % 250 == 0:
-            print(f"  {i + 1} tickers processed")
+        processed += 1
+        if processed % BATCH_TICKERS == 0:
+            flush_history()
+            print(f"  {processed} tickers written")
 
-    hist = pd.concat(hist_all, ignore_index=True)[FEATURE_COLS]
+    flush_history()   # final partial batch
+
     feat = pd.concat(feat_all, ignore_index=True)[FEATURE_COLS]
-    hist["date"] = pd.to_datetime(hist["date"])
     feat["date"] = pd.to_datetime(feat["date"])
-    print(f"gap_history rows={len(hist):,}   gap_features rows={len(feat):,}")
-
-    # write gap_history (partitioned by month, clustered)
     client.load_table_from_dataframe(
-        hist, f"{PROJECT}.{DATASET}.gap_history",
-        job_config=bigquery.LoadJobConfig(
-            write_disposition="WRITE_TRUNCATE",
-            time_partitioning=bigquery.TimePartitioning(field="date", type_="MONTH"),
-            clustering_fields=["ticker", "tf"],
-        ),
-    ).result()
-
-    # write gap_features (small, clustered)
-    client.load_table_from_dataframe(
-        feat, f"{PROJECT}.{DATASET}.gap_features",
+        feat, FEAT_TABLE,
         job_config=bigquery.LoadJobConfig(
             write_disposition="WRITE_TRUNCATE",
             clustering_fields=["ticker", "tf"],
         ),
     ).result()
 
-    print("Done: wrote gap_history + gap_features.")
+    print(f"Done: {processed:,} tickers -> gap_history + gap_features ({len(feat):,} feature rows).")
 
 
 if __name__ == "__main__":
