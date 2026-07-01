@@ -83,10 +83,11 @@ def main():
         SELECT ticker, date, open, high, low, close, adj_close, volume
         FROM `{PROJECT}.{DATASET}.price_history`
         WHERE date < CURRENT_DATE()
+          AND date >= '1998-01-01'
         ORDER BY ticker, date
     """
     print("Reading price_history ...")
-    df = client.query(sql).result().to_dataframe()   # uses Storage API if installed
+    df = client.query(sql).result().to_dataframe(create_bqstorage_client=False)
     print(f"  {len(df):,} rows, {df['ticker'].nunique():,} tickers")
 
     hist_buf, feat_all = [], []
