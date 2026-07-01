@@ -14,16 +14,15 @@ Canonical rule (reconciled across Morales webinar + Chartmill + EEMANi):
   up_day AND volume >= max(down-day volume over prior `lookback` days)
          AND |close - SMA(ma_len)| / SMA(ma_len) <= offset       (near the 10-day, not extended)
          AND close >= (high+low)/2                                (upper half of range)
+NOTE: EEMANi's Pine tests volume vs the max of ALL recent volume — wrong; real rule = max DOWN-day.
 
-NOTE: EEMANi's Pine tests volume vs the max of ALL recent volume — that's wrong; the real
-rule is vs the max DOWN-day volume. This uses the correct definition.
-
-FORCE INDEX (Elder), carried as a FEATURE / grade confirm — NOT a detection filter:
-  force_index = EMA(fi_len) of (close - prior close) * volume   [13-EMA smoothed, matches TV]
-  fi_positive = force_index > 0
-  Backtest (REV-C7): PPs with fi_positive underperform far less often — FI<0 PPs averaged
-  ~-0.4%/10d vs +1.5% for FI>0 (robust 5/6 tickers). Used to DOWNGRADE FI<0 pivots in the
-  grade, not to remove them.
+GRADE-CONFIRM FEATURES (carried in the table, NOT detection filters). The stage / RS-ratio /
+RS>SPY parts of the gate need external data (stage_engine, SPX, Mansfield) and live in the
+enrich view v_pocket_pivot_entries — only the OHLCV-derived confirms are materialized here:
+  force_index = EMA(fi_len) of (Δclose × volume) [Elder, 13-EMA, matches TV] ; fi_positive = >0
+  atr_pct     = EMA(14) of TrueRange / close * 100  (smoothed ATR %)
+  vcp_tight   = atr_pct < atr_pct[20 bars ago] * 0.90   (volatility contracted >=10% vs 20d ago)
+  Backtest (REV-C7/C9): FI>0 and vcp_tight both lift PP forward returns; used to grade, not remove.
 
 df: columns date, open, high, low, close, volume (ascending). Returns a per-bar DataFrame.
 """
@@ -32,7 +31,8 @@ import pandas as pd
 
 
 def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
-                     require_upper_half=True, trend_ma=50, fi_len=13):
+                     require_upper_half=True, trend_ma=50, fi_len=13,
+                     atr_len=14, vcp_lookback=20, vcp_ratio=0.90):
     d = df.reset_index(drop=True).copy()
     n = len(d)
     c = d["close"].to_numpy(float)
@@ -47,14 +47,10 @@ def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
     down_day = np.zeros(n, bool); down_day[1:] = c[1:] < c[:-1]
 
     # highest DOWN-day volume over the prior `lookback` days (excludes today).
-    # no down day in the window -> 0 (up-day volume vacuously exceeds it; the near-MA
-    # filter still excludes the extended "10 up days in a row" case).
     down_vol_max = np.zeros(n)
     for i in range(n):
         lo = max(0, i - lookback)
-        seg_v = v[lo:i]
-        seg_d = down_day[lo:i]
-        dv = seg_v[seg_d]
+        dv = v[lo:i][down_day[lo:i]]
         down_vol_max[i] = dv.max() if dv.size else 0.0
 
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -65,11 +61,21 @@ def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
     upper_half = c >= (h + l) / 2.0
     vol_ok     = v >= down_vol_max
 
-    # Force Index (Elder) — 13-EMA of (Δclose × volume). Feature / grade confirm only.
+    # Force Index (Elder) — 13-EMA of (Δclose × volume). Feature / grade confirm.
     raw_fi = np.zeros(n)
     raw_fi[1:] = (c[1:] - c[:-1]) * v[1:]
     force_index = pd.Series(raw_fi).ewm(span=fi_len, adjust=False).mean().to_numpy()
     fi_positive = force_index > 0
+
+    # ATR% (smoothed) + VCP tightening — OHLCV-derived grade confirm.
+    c_prev = np.empty(n); c_prev[0] = np.nan; c_prev[1:] = c[:-1]
+    tr = np.maximum.reduce([h - l, np.abs(h - c_prev), np.abs(l - c_prev)])
+    tr[0] = h[0] - l[0]
+    atr = pd.Series(tr).ewm(span=atr_len, adjust=False).mean().to_numpy()
+    with np.errstate(divide="ignore", invalid="ignore"):
+        atr_pct = np.where(c > 0, atr / c * 100.0, np.nan)
+    atr_pct_prev = pd.Series(atr_pct).shift(vcp_lookback).to_numpy()
+    vcp_tight = atr_pct < (atr_pct_prev * vcp_ratio)
 
     pp = up_day & vol_ok & near_ma & ~np.isnan(sma_ma)
     if require_upper_half:
@@ -86,11 +92,13 @@ def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
         "sma50": np.round(sma_trd, 4),
         "up_day": up_day,
         "down_vol_max": down_vol_max,
-        "vol_ratio": np.round(vol_ratio, 2),      # today's vol / biggest down-day vol
+        "vol_ratio": np.round(vol_ratio, 2),
         "dist_ma_pct": np.round(dist_ma * 100, 2),
         "upper_half": upper_half,
-        "force_index": np.round(force_index, 2),  # Elder Force Index (13-EMA smoothed)
-        "fi_positive": fi_positive,               # grade confirm: FI>0
+        "force_index": np.round(force_index, 2),   # Elder Force Index (13-EMA)
+        "fi_positive": fi_positive,                 # grade confirm: FI>0
+        "atr_pct": np.round(atr_pct, 3),            # smoothed ATR %
+        "vcp_tight": vcp_tight,                     # grade confirm: ATR% contracted >=10% vs 20d
         "pocket_pivot": pp,
         "pp_type": np.where(pp, pp_type, ""),
     })
