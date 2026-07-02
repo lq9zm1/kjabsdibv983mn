@@ -32,7 +32,8 @@ import pandas as pd
 
 def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
                      require_upper_half=True, trend_ma=50, fi_len=13,
-                     atr_len=14, vcp_lookback=20, vcp_ratio=0.90):
+                     atr_len=14, vcp_lookback=20, vcp_ratio=0.90,
+                     vdu_mult=0.5, vdu_lookback=5, avgv_len=50):
     d = df.reset_index(drop=True).copy()
     n = len(d)
     c = d["close"].to_numpy(float)
@@ -77,6 +78,14 @@ def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
     atr_pct_prev = pd.Series(atr_pct).shift(vcp_lookback).to_numpy()
     vcp_tight = atr_pct < (atr_pct_prev * vcp_ratio)
 
+    # VDU (Volume Dry-Up / Kacher-Morales "VooDoo") precursor: recent_vdu = a dry-up day
+    # (volume < vdu_mult * avg50) in the prior `vdu_lookback` days (excludes today). Validated
+    # PP quality-booster ONLY combined with vcp_tight (REV-C25/C26): tight+VDU +0.75R vs
+    # tight-no-VDU +0.26R (+0.49R lift); no effect on loose PPs. -> A-grade requirement.
+    avgv = pd.Series(v).rolling(avgv_len).mean().to_numpy()
+    vdu = v < (vdu_mult * avgv)
+    recent_vdu = pd.Series(vdu).shift(1).rolling(vdu_lookback).max().fillna(0).astype(bool).to_numpy()
+
     pp = up_day & vol_ok & near_ma & ~np.isnan(sma_ma)
     if require_upper_half:
         pp = pp & upper_half
@@ -99,6 +108,7 @@ def run_pocket_pivot(df, ma_len=10, lookback=10, offset=0.05,
         "fi_positive": fi_positive,                 # grade confirm: FI>0
         "atr_pct": np.round(atr_pct, 3),            # smoothed ATR %
         "vcp_tight": vcp_tight,                     # grade confirm: ATR% contracted >=10% vs 20d
+        "recent_vdu": recent_vdu,                   # VDU dry-up in prior 5d (A-req WITH vcp_tight)
         "pocket_pivot": pp,
         "pp_type": np.where(pp, pp_type, ""),
     })
