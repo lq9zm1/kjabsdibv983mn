@@ -35,6 +35,7 @@ def run_episodic_pivot(
     neglect_6mo=0.25,    # neglect proxy: prior 6mo return < this = "not already rallied"
     range_len=10,        # range-expansion comparison window
     hi_vol_len=252,      # window for "highest volume in ~1yr"
+    fi_len=13,           # Force Index EMA length (Elder) — momentum+volume confirm
     price_floor_col=None,  # column for the min_price liquidity floor; BQ passes 'raw_close'
                            # (raw, unadjusted) so massively-split winners aren't wrongly cut.
                            # Falls back to 'close' if absent (e.g. local single-series CSVs).
@@ -75,6 +76,10 @@ def run_episodic_pivot(
     d["pos_52w"] = (d["close"] - lo52) / (hi52 - lo52)
     # IPO / young-name flag: no 6mo lookback yet -> neglect/pos features unreliable
     d["is_ipo_window"] = d["prior_6mo_ret"].isna()
+    # Force Index (Elder, fi_len-EMA of Δclose × volume). Light backtest (REV-C19):
+    # FI>0 EP meanR +0.41 / PF 1.99 vs FI<0 -0.60 -> the single cleanest EP filter.
+    d["force_index"] = (d["close"].diff() * d["volume"]).ewm(span=fi_len, adjust=False).mean()
+    d["fi_positive"] = d["force_index"] > 0
 
     # --- pre-trigger (REV-C15) ---
     d["trigger_level"] = d["high"]   # EP-day high = daily-bar proxy for ORH entry
