@@ -1,0 +1,25 @@
+name: higher-low-backfill
+# Mirrors hvc/parabolic backfills. Runs after nightly + manual. Align auth/secret with your others.
+on:
+  workflow_run:
+    workflows: ["stonks-nightly"]
+    types: [completed]
+  workflow_dispatch:
+jobs:
+  backfill:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install --upgrade pandas google-cloud-bigquery google-cloud-bigquery-storage db-dtypes
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Run Higher-Low compute
+        run: python compute_higher_low.py
