@@ -30,7 +30,7 @@ FEATURE_COLS = [
     "ticker", "date", "close", "volume", "vol_ratio", "close_pos", "gap",
     "is_hvc", "is_gap_hvc", "hvc_level", "above_hvc", "pct_to_hvc",
     "above_10", "above_20", "above_50", "above_200", "ext_atr_50",
-    "rs_rising", "grade",
+    "days_since_hvc", "ft_hold", "rs_rising", "ft_confirmed", "grade",
 ]
 
 
