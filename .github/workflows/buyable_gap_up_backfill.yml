@@ -1,0 +1,26 @@
+name: buyable-gap-up-backfill
+on:
+  workflow_dispatch: {}          # manual run (one-time backfill or on demand)
+  workflow_run:                  # auto-run after the main nightly finishes
+    workflows: ["stonks-nightly"]
+    types: [completed]
+jobs:
+  backfill:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
+      - name: Write BigQuery service-account key
+        run: echo '${{ secrets.GCP_SA_KEY }}' > "$HOME/key.json"
+      - name: Compute Buyable Gap-Up features (full history)
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
+        run: python compute_buyable_gap_up.py
