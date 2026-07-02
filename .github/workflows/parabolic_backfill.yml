@@ -23,7 +23,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: pip install --upgrade pandas google-cloud-bigquery google-cloud-bigquery-storage
+        run: pip install --upgrade pandas google-cloud-bigquery google-cloud-bigquery-storage db-dtypes
 
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
