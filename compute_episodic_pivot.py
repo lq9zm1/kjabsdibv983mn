@@ -37,6 +37,7 @@ FEATURE_COLS = [
     "ticker", "date", "close", "volume",
     "pct_up", "gap_pct", "vol_ratio",
     "vol_252high", "range_exp", "prior_6mo_ret", "neglect_proxy", "pos_52w", "is_ipo_window",
+    "force_index", "fi_positive",
     "trigger_level", "stop",
 ]
 
