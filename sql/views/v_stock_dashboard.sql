@@ -51,7 +51,8 @@ SELECT
   se.dollar_vol_w, se.avg_dollar_vol_10w, se.avg_vol_10w, se.rel_vol_w,
   se.last_s2_price, se.pct_since_s2, se.last_s4_price, se.pct_since_s4,
   gap.* EXCEPT(ticker),
-  bo.* EXCEPT(ticker)
+  bo.* EXCEPT(ticker),
+  pf.* EXCEPT(ticker)
 FROM d
 LEFT JOIN `stonks-498420.stonks_data.tickers` t USING (ticker)
 LEFT JOIN `stonks-498420.stonks_data.rs_momentum` rm USING (ticker)
@@ -126,3 +127,20 @@ LEFT JOIN (
     pct_to_21ema AS bo_pct_to_21ema
   FROM `stonks-498420.stonks_data.breakout_features`
 ) bo USING (ticker)
+LEFT JOIN (
+  SELECT ticker,
+    grade            AS parabolic_grade,
+    armed            AS parabolic_armed,
+    parabolic_short  AS parabolic_entry_today,
+    ext_atr_50       AS parabolic_ext,
+    rsi              AS parabolic_rsi,
+    stretch5         AS parabolic_stretch,
+    run_pct          AS parabolic_run_pct,
+    gap_run          AS parabolic_gap_run,
+    pct_above_50     AS parabolic_pct_above_50,
+    pct_from_peak    AS parabolic_pct_from_peak,
+    pct_to_prior_low AS parabolic_pct_to_prior_low,
+    below_avwap      AS parabolic_below_avwap,
+    stop             AS parabolic_stop
+  FROM `stonks-498420.stonks_data.parabolic_features`
+) pf USING (ticker)
