@@ -22,7 +22,7 @@ DATASET = "stonks_data"
 TABLE = f"{PROJECT}.{DATASET}.price_intraday"
 API_KEY = os.environ.get("EODHD_API_KEY")
 
-INTERVAL = "5m"          # 5m = 600-day history (use 1m only for recent <=120d / 3m resample)
+INTERVAL = os.environ.get("INTRADAY_INTERVAL", "5m")   # 5m (600d) or 1m (120d, for 2m/3m resample)
 WINDOW_DAYS = 5          # +/- days around each entry day
 
 # ---------- FIRM QUOTA GUARDRAILS ----------
