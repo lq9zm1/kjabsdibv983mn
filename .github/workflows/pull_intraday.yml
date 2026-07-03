@@ -1,9 +1,15 @@
 name: pull-intraday
 
-# Manual-only. Run from the Actions tab -> "pull-intraday" -> Run workflow.
-# 🔐 EODHD token comes from the GitHub Secret EODHD_API_KEY (never hardcode in the .py).
+# Manual-only. Actions -> "pull-intraday" -> Run workflow -> pick interval (5m or 1m).
+# 🔐 EODHD token from GitHub Secret EODHD_API_KEY.
 on:
   workflow_dispatch:
+    inputs:
+      interval:
+        description: "Intraday interval"
+        type: choice
+        default: "5m"
+        options: ["5m", "1m"]
 
 jobs:
   pull:
@@ -11,20 +17,17 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Install deps
         run: pip install --upgrade requests pandas google-cloud-bigquery google-cloud-bigquery-storage db-dtypes
-
       - name: Auth to GCP
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
-
       - name: Pull intraday
         env:
           EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+          INTRADAY_INTERVAL: ${{ inputs.interval }}
         run: python pull_intraday.py
