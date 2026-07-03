@@ -23,7 +23,8 @@ TABLE = f"{PROJECT}.{DATASET}.price_intraday"
 API_KEY = os.environ.get("EODHD_API_KEY")
 
 INTERVAL = os.environ.get("INTRADAY_INTERVAL", "5m")   # 5m (600d) or 1m (120d, for 2m/3m resample)
-WINDOW_DAYS = 5          # +/- days around each entry day
+WINDOW_DAYS_BEFORE = 25  # prior days pulled (for TIME-OF-DAY RVOL baseline; ~17 trading days)
+WINDOW_DAYS_AFTER = 5    # days after the entry day
 
 # ---------- FIRM QUOTA GUARDRAILS ----------
 MAX_API_CALLS = 20000    # hard cap (~20% of the 100k/day plan). NEVER touch the 500 buffer.
@@ -46,8 +47,8 @@ def to_unix(d):
 
 
 def pull_one(ticker, entry_date):
-    frm = to_unix(entry_date) - WINDOW_DAYS * 86400
-    to = to_unix(entry_date) + (WINDOW_DAYS + 1) * 86400
+    frm = to_unix(entry_date) - WINDOW_DAYS_BEFORE * 86400
+    to = to_unix(entry_date) + (WINDOW_DAYS_AFTER + 1) * 86400
     url = f"https://eodhd.com/api/intraday/{ticker}.US"
     params = {"api_token": API_KEY, "interval": INTERVAL, "fmt": "json", "from": frm, "to": to}
     r = requests.get(url, params=params, timeout=30)
