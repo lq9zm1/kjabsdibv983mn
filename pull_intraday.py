@@ -32,10 +32,12 @@ SLEEP_SEC = 0.08         # ~750 req/min, safely under the 1000/min limit
 
 # ---------- TARGETS: (ticker, 'YYYY-MM-DD') entry days. Edit for the BASIC TEST. ----------
 # For the basic test, put a few Flat Base / Pocket Pivot entry days here (recent = also 1m-capable).
+# FLAT BASE entry days only (from your charts). Approximate — adjust to the exact breakout day if needed.
 TARGETS = [
-    ("NVDA", "2025-05-29"),
-    ("META", "2025-04-30"),
-    # ("TICKER", "YYYY-MM-DD"),  # add your flat-base / pocket-pivot entries
+    ("NVDA", "2024-01-08"),   # flat base . rectangle ~11%
+    ("NVDA", "2024-02-26"),   # flat base . rectangle ~22%
+    ("META", "2023-01-27"),   # flat base . rectangle ~15%
+    # ("TICKER", "YYYY-MM-DD"),  # add more flat-base entry days
 ]
 
 
