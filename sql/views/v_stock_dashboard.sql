@@ -52,7 +52,20 @@ SELECT
   se.last_s2_price, se.pct_since_s2, se.last_s4_price, se.pct_since_s4,
   gap.* EXCEPT(ticker),
   bo.* EXCEPT(ticker),
-  pf.* EXCEPT(ticker)
+  pf.* EXCEPT(ticker),
+  hvc.* EXCEPT(ticker),
+  hl10.* EXCEPT(ticker),
+  ab.* EXCEPT(ticker),
+  bb.* EXCEPT(ticker),
+  su.* EXCEPT(ticker),
+  CASE WHEN ab.asc_is_break IS NOT TRUE THEN NULL
+       WHEN se.stage LIKE '2%' AND se.wks_since <= 6  THEN 'A'
+       WHEN se.stage LIKE '2%' AND se.wks_since <= 15 THEN 'B'
+       ELSE 'C' END AS asc_grade,
+  CASE WHEN bb.onebee_is_break IS NOT TRUE THEN NULL
+       WHEN se.stage LIKE '2%' AND se.wks_since <= 6  THEN 'A'
+       WHEN se.stage LIKE '2%' AND se.wks_since <= 15 THEN 'B'
+       ELSE 'C' END AS onebee_grade
 FROM d
 LEFT JOIN `stonks-498420.stonks_data.tickers` t USING (ticker)
 LEFT JOIN `stonks-498420.stonks_data.rs_momentum` rm USING (ticker)
@@ -146,3 +159,50 @@ LEFT JOIN (
     stop             AS parabolic_stop
   FROM `stonks-498420.stonks_data.parabolic_features`
 ) pf USING (ticker)
+
+LEFT JOIN (
+  SELECT ticker,
+    grade AS hvc_grade, is_hvc AS hvc_is_hvc, is_gap_hvc AS hvc_is_gap_hvc,
+    hvc_level, above_hvc AS hvc_above_hvc, pct_to_hvc AS hvc_pct_to_hvc,
+    vol_ratio AS hvc_vol_ratio, close_pos AS hvc_close_pos, gap AS hvc_gap,
+    above_10 AS hvc_above_10, above_20 AS hvc_above_20, above_50 AS hvc_above_50, above_200 AS hvc_above_200,
+    ext_atr_50 AS hvc_ext_atr_50, days_since_hvc AS hvc_days_since, ft_hold AS hvc_ft_hold,
+    rs_rising AS hvc_rs_rising, ft_confirmed AS hvc_ft_confirmed
+  FROM `stonks-498420.stonks_data.hvc_features`
+) hvc USING (ticker)
+LEFT JOIN (
+  SELECT ticker,
+    hl_grade AS hl10_grade, is_reclaim AS hl10_is_reclaim, hvc_level AS hl10_hvc_level,
+    ext_atr_50 AS hl10_ext_atr_50, rs_not_rising AS hl10_rs_not_rising, days_since_hvc AS hl10_days_since,
+    pullback_low AS hl10_pullback_low, pullback_depth AS hl10_pullback_depth,
+    stop AS hl10_stop, risk_pct AS hl10_risk_pct
+  FROM `stonks-498420.stonks_data.higher_low_features`
+) hl10 USING (ticker)
+LEFT JOIN (
+  SELECT ticker,
+    is_ascending_break AS asc_is_break, rising_lows AS asc_rising_lows,
+    range_high AS asc_range_high, base_low AS asc_base_low, base_width AS asc_base_width,
+    tight_ma_stop AS asc_tight_ma_stop, stop AS asc_stop, risk_pct AS asc_risk_pct, ext_atr_50 AS asc_ext_atr_50
+  FROM `stonks-498420.stonks_data.ascending_base_features`
+) ab USING (ticker)
+LEFT JOIN (
+  SELECT ticker,
+    is_1b_break AS onebee_is_break, rising_lows AS onebee_rising_lows, hvc_level AS onebee_hvc_level,
+    days_since_hvc AS onebee_days_since, pullback_depth AS onebee_pullback_depth,
+    tight_ma_stop AS onebee_tight_ma_stop, stop AS onebee_stop, risk_pct AS onebee_risk_pct, ext_atr_50 AS onebee_ext_atr_50
+  FROM `stonks-498420.stonks_data.hvc_base_break_features`
+) bb USING (ticker)
+LEFT JOIN (
+  SELECT ticker,
+    sub_first AS setup_sub_first, sub_late AS setup_sub_late, wrong_side AS setup_wrong_side,
+    kell_phase AS setup_kell_phase, phase_grade AS setup_phase_grade,
+    abv_10ema AS setup_abv_10ema, abv_21ema AS setup_abv_21ema, abv_20sma AS setup_abv_20sma, abv_50sma AS setup_abv_50sma,
+    at_ema_band AS setup_at_ema_band, new_4w_high AS setup_new_4w_high, new_4w_low AS setup_new_4w_low,
+    rs_pctile AS setup_rs_pctile, rs_leading AS setup_rs_leading, sata_strong AS setup_sata_strong,
+    vol_surge AS setup_vol_surge, px_vs_50sma AS setup_px_vs_50sma,
+    vcp_tightness AS setup_vcp_tightness, vcp_tier AS setup_vcp_tier, vcp_band AS setup_vcp_band,
+    sma_150 AS setup_sma_150, rs_12m AS setup_rs_12m,
+    trend_template_count AS setup_tt_count, trend_template_pass AS setup_tt_pass
+  FROM `stonks-498420.stonks_data.setups_daily`
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) = 1
+) su USING (ticker)
