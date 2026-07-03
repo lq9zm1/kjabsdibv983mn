@@ -33,12 +33,12 @@ SLEEP_SEC = 0.08         # ~750 req/min, safely under the 1000/min limit
 
 # ---------- TARGETS: (ticker, 'YYYY-MM-DD') entry days. Edit for the BASIC TEST. ----------
 # For the basic test, put a few Flat Base / Pocket Pivot entry days here (recent = also 1m-capable).
-# FLAT BASE entry days only (from your charts). Approximate — adjust to the exact breakout day if needed.
+# Cyber-EDR group + parent ETF CIBR, on 3 flat-base entry days (2 grade-A + a recent B pair).
+# All 5 tickers each day -> so we can rank the group's intraday RVOL/RS leader vs the ETF.
 TARGETS = [
-    ("NVDA", "2024-01-08"),   # flat base . rectangle ~11%
-    ("NVDA", "2024-02-26"),   # flat base . rectangle ~22%
-    ("META", "2023-01-27"),   # flat base . rectangle ~15%
-    # ("TICKER", "YYYY-MM-DD"),  # add more flat-base entry days
+    ("CRWD","2025-11-10"),("PANW","2025-11-10"),("DDOG","2025-11-10"),("FTNT","2025-11-10"),("CIBR","2025-11-10"),
+    ("CRWD","2025-11-06"),("PANW","2025-11-06"),("DDOG","2025-11-06"),("FTNT","2025-11-06"),("CIBR","2025-11-06"),
+    ("CRWD","2026-06-26"),("PANW","2026-06-26"),("DDOG","2026-06-26"),("FTNT","2026-06-26"),("CIBR","2026-06-26"),
 ]
 
 
