@@ -29,7 +29,7 @@ def main():
     # 1m regular-session bars -> pandas
     q = f"""
       SELECT ticker, dt_utc, open, high, low, close, volume
-      FROM `{SRC}`
+      FROM `{PROJECT}.{DATASET}.v_price_intraday`
       WHERE `interval` = '1m'
         AND TIME(dt_utc) BETWEEN '13:30:00' AND '20:00:00'
     """
