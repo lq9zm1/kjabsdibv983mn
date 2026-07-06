@@ -1,26 +1,24 @@
 name: intraday-ema
 on:
-  workflow_dispatch: {}          # manual run (on demand)
-  workflow_run:                  # auto-run after the intraday pull finishes
+  workflow_dispatch: {}
+  workflow_run:
     workflows: ["pull-intraday"]
     types: [completed]
 jobs:
   compute:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.12'
       - name: Install deps
-        run: pip install -r requirements.txt
-      - name: Write BigQuery service-account key
-        run: echo '${{ secrets.GCP_SA_KEY }}' > "$HOME/key.json"
+        run: pip install --upgrade pandas google-cloud-bigquery google-cloud-bigquery-storage db-dtypes
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
       - name: Compute intraday 5m EMA6/EMA20
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
         run: python compute_intraday_ema.py
