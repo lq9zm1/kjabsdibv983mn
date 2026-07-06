@@ -1,0 +1,27 @@
+name: pull-realtime
+on:
+  workflow_dispatch: {}
+  schedule:
+    # every 15 min, 13:30–20:00 UTC, Mon–Fri (market hours EDT). Cron is UTC; ignores DST.
+    - cron: "30,45 13 * * 1-5"
+    - cron: "*/15 14-19 * * 1-5"
+    - cron: "0 20 * * 1-5"
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install --upgrade requests pandas google-cloud-bigquery db-dtypes
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Pull real-time
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+        run: python pull_realtime.py
