@@ -67,8 +67,16 @@ def main():
     res["above_ema20"] = res["close"] > res["ema20"]
     res["pct_to_ema6"]  = (res["close"] / res["ema6"]  - 1) * 100
     res["pct_to_ema20"] = (res["close"] / res["ema20"] - 1) * 100
+    # ★ REV-C131 crossover proximity
+    res["ema6_vs_ema20_pct"] = (res["ema6"] / res["ema20"] - 1) * 100   # exact: >0 = bullish (ema6 above ema20)
+    res["bullish_cross"] = res["ema6"] > res["ema20"]                    # bool
+    # est_cross_price = next close that would make ema6 == ema20 (holds ema20 constant). ESTIMATE.
+    _alpha = 2 / (EMA_FAST + 1)
+    res["est_cross_price"] = (res["ema20"] - (1 - _alpha) * res["ema6"]) / _alpha
+    res["est_cross_dist_pct"] = (res["est_cross_price"] / res["close"] - 1) * 100   # ESTIMATE
     keep = ["ticker", "trade_date", "dt_utc", "open", "high", "low", "close", "volume",
-            "ema6", "ema20", "above_ema6", "above_ema20", "pct_to_ema6", "pct_to_ema20"]
+            "ema6", "ema20", "above_ema6", "above_ema20", "pct_to_ema6", "pct_to_ema20",
+            "ema6_vs_ema20_pct", "bullish_cross", "est_cross_price", "est_cross_dist_pct"]
     res = res[keep]
 
     client.load_table_from_dataframe(
