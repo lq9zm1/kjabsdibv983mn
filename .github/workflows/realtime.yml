@@ -1,12 +1,11 @@
 name: pull-realtime
-# re-arm schedule 2026-07-07
 on:
   workflow_dispatch: {}
-  schedule:
-    # every 5 min, 13:30–20:00 UTC, Mon–Fri (market hours EDT). Cron is UTC; ignores DST.
-    - cron: "30,35,40,45,50,55 13 * * 1-5"
-    - cron: "*/5 14-19 * * 1-5"
-    - cron: "0 20 * * 1-5"
+  # schedule DISABLED — Apps Script now handles live pulls
+  # schedule:
+  #   - cron: "30,35,40,45,50,55 13 * * 1-5"
+  #   - cron: "*/5 14-19 * * 1-5"
+  #   - cron: "0 20 * * 1-5"
 jobs:
   pull:
     runs-on: ubuntu-latest
