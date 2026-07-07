@@ -1,4 +1,5 @@
 name: pull-realtime
+# re-arm schedule 2026-07-07
 on:
   workflow_dispatch: {}
   schedule:
