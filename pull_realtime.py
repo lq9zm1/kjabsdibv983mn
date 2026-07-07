@@ -71,12 +71,13 @@ def main():
             df[c] = pd.to_numeric(df[c], errors="coerce")
     keep = ["ticker", "quote_utc", "open", "high", "low", "close", "volume",
             "previousClose", "change", "change_p"]
-    df = df[[c for c in keep if c in df.columns]].dropna(subset=["close"])
+    df = df[[c for c in keep if c in df.columns]].dropna(subset=["close"]).drop_duplicates(subset=["ticker", "quote_utc"])
 
     client.load_table_from_dataframe(
         df, TABLE,
         job_config=bigquery.LoadJobConfig(
-            write_disposition="WRITE_TRUNCATE",   # latest snapshot only
+            write_disposition="WRITE_APPEND",   # ★ snapshots accumulate = 15-min bar series (dedupe via v_realtime_bars)
+            time_partitioning=bigquery.TimePartitioning(field="quote_utc", type_="DAY"),
             clustering_fields=["ticker"],
         ),
     ).result()
