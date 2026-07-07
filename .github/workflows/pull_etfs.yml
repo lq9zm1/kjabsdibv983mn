@@ -1,7 +1,9 @@
 name: pull-etfs
-# Manual-only one-time backfill of parent-ETF EOD history -> etf_prices.
+# Nightly parent-ETF (+SPY) EOD -> etf_prices. WRITE_TRUNCATE (idempotent).
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'   # 07:00 UTC daily (after US EOD posts; weekend re-pulls are harmless)
 jobs:
   pull:
     runs-on: ubuntu-latest
