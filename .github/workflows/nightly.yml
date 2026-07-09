@@ -1,7 +1,8 @@
 name: stonks-nightly
 on:
   schedule:
-    - cron: "30 6 * * *"
+    - cron: "23 6 * * *"    # 1:23 AM CDT — primary (odd minute, less congested)
+    - cron: "47 9 * * *"    # 4:47 AM CDT — backup (catches any skip; EOD definitely ready)
   workflow_dispatch: {}
 jobs:
   nightly:
