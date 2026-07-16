@@ -1,9 +1,10 @@
 """
-pull_etfs.py — one-time backfill of parent-ETF (+ SPY) EOD daily history -> BigQuery `etf_prices`.
-For the theme x ETF-RS backtest (ETFs aren't in price_history). Separate table so it does NOT
-pollute the stock detector universe. ETF list pulled from theme_map (complete).
+pull_etfs_v2.py — backfill ETF EOD daily history -> BigQuery `etf_prices`.
+v2 change (2026-07-16): universe now comes from the dedicated `etf_universe` table
+(source='eodhd' only — the US ETFs; tv-source macros like ^VIX/futures are backtest-only via TV).
+Also bumped MAX_API_CALLS 100 -> 250 (eodhd universe is now ~145 ETFs; old cap would abort mid-run).
 
-Run via GitHub Action (pull_etfs.yml) or: EODHD_API_KEY=xxx python pull_etfs.py
+Run via GitHub Action (pull_etfs.yml) or: EODHD_API_KEY=xxx python pull_etfs_v2.py
 Requires: requests, pandas, google-cloud-bigquery, db-dtypes
 """
 import os
@@ -17,8 +18,9 @@ PROJECT = "stonks-498420"
 DATASET = "stonks_data"
 TABLE = f"{PROJECT}.{DATASET}.etf_prices"
 API_KEY = os.environ.get("EODHD_API_KEY")
-FROM_DATE = "2019-01-01"     # enough history for 21d RS + a multi-year backtest
-MAX_API_CALLS = 100          # ETF backfill is tiny (1 call/ticker)
+FROM_DATE = "1990-01-01"     # grab full inception history (EODHD returns each ETF from its start;
+                             # 1 call/ticker regardless of range → no extra API cost). Was 2019-01-01.
+MAX_API_CALLS = 250          # was 100 — universe grew to ~145 ETFs; keep headroom
 
 
 def pull_eod(ticker):
@@ -38,8 +40,10 @@ def main():
     if not API_KEY:
         raise SystemExit("Set EODHD_API_KEY env var (do NOT hardcode).")
     client = bigquery.Client(project=PROJECT)
-    etfs = [r.etf for r in client.query(
-        f"SELECT DISTINCT etf FROM `{PROJECT}.{DATASET}.theme_map` WHERE etf IS NOT NULL"
+    # v2: pull the ETF universe from the dedicated table, EODHD-pullable US ETFs only
+    etfs = [r.ticker for r in client.query(
+        f"SELECT DISTINCT ticker FROM `{PROJECT}.{DATASET}.etf_universe` "
+        f"WHERE source = 'eodhd' AND ticker IS NOT NULL"
     ).result()]
     if "SPY" not in etfs:
         etfs.append("SPY")
