@@ -21,7 +21,7 @@ gap_asof AS (
 stage_asof AS (
   SELECT p.d, p.ticker, se.broad_stage, se.stage AS substage, se.wks_since, se.came_from,
     ROW_NUMBER() OVER (PARTITION BY p.ticker, p.d ORDER BY se.wk DESC) AS rn
-  FROM lr p LEFT JOIN `stonks-498420.stonks_data.stage_engine` se
+  FROM lr p LEFT JOIN `stonks-498420.stonks_data.stage_engine_v2` se
     ON se.ticker = p.ticker AND se.wk < DATE_TRUNC(p.d, WEEK(MONDAY))
 ),
 band AS (   -- SATA band states ON THE EXACT reclaim date

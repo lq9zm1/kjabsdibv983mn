@@ -16,7 +16,7 @@ stg AS (
   SELECT e.ticker, e.entry_date, se.wk AS stage_week,
          se.broad_stage, se.stage, se.wks_since, se.came_from
   FROM entries e
-  LEFT JOIN `stonks-498420.stonks_data.stage_engine` se
+  LEFT JOIN `stonks-498420.stonks_data.stage_engine_v2` se
     ON se.ticker = e.ticker
    AND DATE(se.wk) < DATE_TRUNC(DATE(e.entry_date), WEEK(MONDAY))
   QUALIFY ROW_NUMBER() OVER (PARTITION BY e.ticker, e.entry_date ORDER BY se.wk DESC) = 1

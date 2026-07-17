@@ -87,7 +87,7 @@ LEFT JOIN (
          wd.channel_hh_4w,  wd.channel_ll_4w,  wd.channel_hc_4w,  wd.channel_lc_4w,
          wd.dollar_vol_w, wd.avg_dollar_vol_10w, wd.avg_vol_10w, wd.rel_vol_w,
          wd.last_s2_price, wd.pct_since_s2, wd.last_s4_price, wd.pct_since_s4
-  FROM `stonks-498420.stonks_data.stage_engine` se
+  FROM `stonks-498420.stonks_data.stage_engine_v2` se
   JOIN `stonks-498420.stonks_data.sata_score` ss ON ss.ticker = se.ticker AND ss.wk = se.wk
   LEFT JOIN `stonks-498420.stonks_data.weekly_detail` wd ON wd.ticker = se.ticker AND wd.wk = se.wk
   QUALIFY ROW_NUMBER() OVER (PARTITION BY se.ticker ORDER BY se.wk DESC) = 1

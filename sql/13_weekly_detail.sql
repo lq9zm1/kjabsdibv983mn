@@ -30,7 +30,7 @@ WITH w AS (
 joined AS (
   SELECT w.*, se.broad_stage, se.wks_since
   FROM w
-  LEFT JOIN `stonks-498420.stonks_data.stage_engine` se USING (ticker, wk)
+  LEFT JOIN `stonks-498420.stonks_data.stage_engine_v2` se USING (ticker, wk)
 ),
 lvl AS (
   SELECT *,

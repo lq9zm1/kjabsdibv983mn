@@ -1,6 +1,6 @@
 -- 12b_stage_engine_v2.sql
 -- PARALLEL v2 stage engine (geometry broad rule). Writes `stage_engine_v2` and does NOT
--- touch the live `stage_engine`. Lets setups be compared under v1 vs v2 before any swap.
+-- touch the live `stage_engine_v2`. Lets setups be compared under v1 vs v2 before any swap.
 --
 -- v2 BROAD change vs v1: drops the r8 30W-SLOPE exit. A stage holds while price stays on its
 -- side of the 30W/40W and goes Neutral when price CROSSES the MA; entry needs 3% separation
