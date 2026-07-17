@@ -69,7 +69,7 @@ def main():
         SELECT ticker, date, open, high, low, close, adj_close, volume
         FROM `{PROJECT}.{DATASET}.price_history`
         WHERE date < CURRENT_DATE()
-          AND date >= '1998-01-01'
+          AND date >= '1990-01-01'
         ORDER BY ticker, date
     """
     print("Reading price_history ...")
