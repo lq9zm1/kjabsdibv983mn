@@ -2,7 +2,7 @@ CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_stock_dashboard` AS
 WITH d AS (
   SELECT m.*,
     s.main_theme, s.sub_theme, s.etf,
-    ROUND((m.ret_1d+m.ret_1w+m.ret_1m+m.ret_3m+m.ret_6m)/NULLIF(m.atr_pct,0),4) AS group_score
+    ROUND((SELECT AVG(r) FROM UNNEST([m.ret_1d,m.ret_1w,m.ret_1m,m.ret_3m,m.ret_6m]) r),4) AS group_score
   FROM `stonks-498420.stonks_data.metrics_daily` m
   LEFT JOIN `stonks-498420.stonks_data.stock_theme_map` s USING (ticker)
 )
