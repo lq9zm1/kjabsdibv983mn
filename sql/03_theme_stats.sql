@@ -3,7 +3,7 @@ WITH per_stock AS (
   SELECT s.sub_theme,
     m.rs_value_21d AS stock_theme_rs,
     m.dvol_per_atr,
-    (m.ret_1d+m.ret_1w+m.ret_1m+m.ret_3m+m.ret_6m)/NULLIF(m.atr_pct,0) AS group_score
+    (SELECT AVG(r) FROM UNNEST([m.ret_1d,m.ret_1w,m.ret_1m,m.ret_3m,m.ret_6m]) r) AS group_score
   FROM `stonks-498420.stonks_data.stock_theme_map` s
   JOIN `stonks-498420.stonks_data.metrics_daily` m USING (ticker)
 ),
