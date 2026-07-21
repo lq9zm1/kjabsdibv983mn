@@ -1,0 +1,24 @@
+name: pull-etf-holdings
+on:
+  schedule:
+    - cron: '0 9 * * 0'      # Sundays 09:00 UTC
+  workflow_dispatch:
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install --upgrade google-cloud-bigquery
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Pull ETF holdings
+        env:
+          ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
+        run: python pull_etf_holdings.py
