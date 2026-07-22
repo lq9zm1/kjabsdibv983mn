@@ -96,15 +96,17 @@ cur AS (
   FROM `stonks-498420.stonks_data.leader_tier_daily` t, latest
   WHERE t.date = latest.d
 ),
-recency AS (   -- last day each (ticker,theme) was in each tier
+recency AS (   -- last day each (ticker,theme) sat in each tier — these ARE the dates you can match on
   SELECT ticker, theme,
-    MAX(IF(leader_tier = 'Laggard', date, NULL)) AS last_laggard_date,
-    MAX(IF(leader_tier = 'Leader',  date, NULL)) AS last_leader_date
+    MAX(IF(leader_tier = 'Leader',  date, NULL)) AS last_leader_date,
+    MAX(IF(leader_tier = 'Mid',     date, NULL)) AS last_mid_date,
+    MAX(IF(leader_tier = 'Laggard', date, NULL)) AS last_laggard_date
   FROM `stonks-498420.stonks_data.leader_tier_daily`
   GROUP BY ticker, theme
 )
 SELECT c.ticker, c.theme, c.main_theme, c.etf, c.group_score, c.stock_rs, c.current_tier,
-  rc.last_laggard_date, rc.last_leader_date,
-  DATE_DIFF((SELECT d FROM latest), rc.last_laggard_date, DAY) AS days_since_laggard,   -- just-climbed-out signal
-  DATE_DIFF((SELECT d FROM latest), rc.last_leader_date,  DAY) AS days_since_leader
+  rc.last_leader_date, rc.last_mid_date, rc.last_laggard_date,
+  DATE_DIFF((SELECT d FROM latest), rc.last_leader_date,  DAY) AS days_since_leader,
+  DATE_DIFF((SELECT d FROM latest), rc.last_mid_date,     DAY) AS days_since_mid,
+  DATE_DIFF((SELECT d FROM latest), rc.last_laggard_date, DAY) AS days_since_laggard    -- just-climbed-out signal
 FROM cur c LEFT JOIN recency rc USING (ticker, theme);
