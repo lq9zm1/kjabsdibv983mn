@@ -88,7 +88,8 @@ def screen_band(lo, hi):
     """Page through one market-cap band; return (rows, hit_cap). May raise _BudgetHit."""
     filters = [["market_capitalization", ">=", lo],
                ["market_capitalization", "<",  hi],
-               ["avgvol_200d", ">=", MIN_SHARE_VOL]]
+               ["avgvol_200d", ">=", MIN_SHARE_VOL],
+               ["exchange", "=", "US"]]          # US only (screener is GLOBAL by default)
     rows, offset, hit_cap = [], 0, False
     while True:
         data = _screen_request({"api_token": API_KEY, "filters": json.dumps(filters),
@@ -150,11 +151,30 @@ def main():
             df[c] = pd.to_numeric(df[c], errors="coerce")
     df["avg_dollar_vol"] = df["avgvol_200d"] * df["adjusted_close"]
 
-    # gates — the endpoint is already /US, so only EXCLUDE OTC/pink (don't whitelist exchanges):
-    OTC = {"OTC", "OTCQB", "OTCQX", "OTCMKTS", "PINK", "GREY", "EXPM"}
-    if "exchange" in df.columns:
-        df = df[~df["exchange"].astype(str).str.upper().isin(OTC)]
-    print(f"after exchange filter: {len(df)}", flush=True)
+    # 1) US-LISTED only — the SAME source your curated universe uses (NASDAQ Trader directory
+    #    snapshot in directory_symbols). Kills all foreign (KO/JK/etc.) definitively.
+    def _n(c): return str(c).upper().strip().replace(".", "-").replace("/", "-")
+    us = set()
+    try:
+        us = {r.symbol for r in client.query(
+            "SELECT symbol FROM `stonks-498420.stonks_data.directory_symbols` "
+            "WHERE date = (SELECT MAX(date) FROM `stonks-498420.stonks_data.directory_symbols`)"
+        ).result()}
+    except Exception as e:
+        print("  (directory_symbols filter skipped:", e, ")", flush=True)
+    if us:
+        df = df[df["code"].apply(lambda c: _n(c) in us)]
+    print(f"after US-directory filter: {len(df)}", flush=True)
+
+    # 2) COMMON STOCKS only — drop ETFs/funds/ADRs (no sector, or fund-ish name) + non-letter tickers
+    if "sector" in df.columns:
+        df = df[df["sector"].notna() & df["sector"].astype(str).str.strip().ne("")]
+    df = df[~df["name"].astype(str).str.upper().str.contains(
+        r"ETF|FUND|TRUST|SPDR|ISHARES|INDEX|PORTFOLIO|ETN", na=False, regex=True)]
+    df = df[df["code"].astype(str).str.match(r"^[A-Za-z][A-Za-z.\-]{0,5}$")]   # US common: letters (+class)
+    print(f"after common-stock filter: {len(df)}", flush=True)
+
+    # 3) $vol gate + warrant/dedup
     df = df[df["avg_dollar_vol"] >= MIN_DOLLAR_VOL]
     print(f"after >= ${MIN_DOLLAR_VOL/1e6:.0f}M avg $vol: {len(df)}", flush=True)
     df = df[~df["code"].astype(str).str.upper().str.contains(r"[.\-](WS|WT|U|RT|R)$", na=False, regex=True)]
