@@ -31,3 +31,6 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS: /home/runner/key.json
           EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
         run: python run_nightly.py
+      - name: Refresh ticker_review sheet
+        if: always()
+        run: curl -s "${{ secrets.SHEET_REFRESH_URL }}" >/dev/null || true
