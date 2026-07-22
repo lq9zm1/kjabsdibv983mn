@@ -32,9 +32,10 @@ WITH gs AS (   -- per (ticker, theme, date): group_score = AVG of the 5 returns 
     l.group_score,        -- = AVG(ret_1d,1w,1m,3m,6m) — the corrected form (matches theme_stats + fixed v_stock_dashboard)
     l.rs_rsp              -- historical leader-hunter RS (Mansfield rs_value_21d is latest-only, not kept here)
   FROM `stonks-498420.stonks_data.bt_leader_daily` l
-  JOIN `stonks-498420.stonks_data.stock_theme_map` s ON s.ticker = l.ticker
+  JOIN `stonks-498420.stonks_data.stock_theme_map` s
+    ON REGEXP_REPLACE(UPPER(s.ticker), r'[./]', '-') = l.ticker   -- normalize dot/slash share-class to price_history's dash form
   WHERE s.sub_theme IS NOT NULL
-    AND l.date >= DATE '2005-01-01'   -- covers the backtest fires (earliest ~2005-06); widen for more history
+    -- FULL history: no date floor (bt_leader_daily + fires both start 1962). Add `AND l.date >= DATE 'YYYY-01-01'` to cap it.
 ),
 bands AS (   -- per (theme, date): mean + spread of member group_scores (theme_stats logic, sql/03)
   SELECT theme, date, AVG(group_score) AS avg_gs, STDDEV_SAMP(group_score) AS spread
