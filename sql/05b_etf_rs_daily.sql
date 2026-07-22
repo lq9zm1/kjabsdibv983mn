@@ -14,13 +14,13 @@ CREATE OR REPLACE TABLE `stonks-498420.stonks_data.etf_rs_daily`
 PARTITION BY DATE_TRUNC(date, MONTH) CLUSTER BY ticker AS
 WITH
 u AS ( SELECT ticker, category FROM `stonks-498420.stonks_data.etf_universe` ),
-epx AS (
-  SELECT p.ticker, p.date,
+epx AS (                                   -- etf_prices.date is TIMESTAMP -> cast to DATE to match price_history
+  SELECT p.ticker, DATE(p.date) AS date,
     p.adj_close / NULLIF(LAG(p.adj_close,21) OVER (PARTITION BY p.ticker ORDER BY p.date),0) AS r21
   FROM `stonks-498420.stonks_data.etf_prices` p
 ),
-spy AS (
-  SELECT date, adj_close / NULLIF(LAG(adj_close,21) OVER (ORDER BY date),0) AS spy_r21
+spy AS (                                   -- cast to DATE too (defensive; keeps USING(date) type-safe)
+  SELECT DATE(date) AS date, adj_close / NULLIF(LAG(adj_close,21) OVER (ORDER BY date),0) AS spy_r21
   FROM `stonks-498420.stonks_data.price_history` WHERE ticker='SPY'
 ),
 rel AS (
