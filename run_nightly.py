@@ -278,6 +278,36 @@ def write_review(curated, pull_list, absent, failed, new_syms):
             "themes": None, "detail": "new in directory — theme it if relevant",
             "as_of": TODAY,
         })
+      # candidates: liquid ($50M+ avg $vol) names NOT in the curated universe (top by $vol).
+    #   Built weekly by pull_liquid_universe.py -> liquid_universe. Surfaces names to theme/add.
+    try:
+        CAND_CAP = 300
+        curated_norm = {norm(t) for t in curated}
+        etf_norm = set()
+        if table_exists("etf_universe"):
+            etf_norm = {norm(r.ticker) for r in bq.query(
+                f"SELECT DISTINCT ticker FROM `{tbl('etf_universe')}` WHERE ticker IS NOT NULL"
+            ).result()}
+        if table_exists("liquid_universe"):
+            cand_total = 0
+            for r in bq.query(f"""SELECT ticker, name, sector, avg_dollar_vol
+                                  FROM `{tbl('liquid_universe')}` ORDER BY avg_dollar_vol DESC""").result():
+                nt = norm(r.ticker)
+                if nt in curated_norm or nt in etf_norm:
+                    continue
+                cand_total += 1
+                if cand_total <= CAND_CAP:
+                    review_rows.append({
+                        "section": "candidate", "ticker": r.ticker, "name": r.name, "themes": None,
+                        "detail": f"${(r.avg_dollar_vol or 0)/1e6:,.0f}M avg $vol"
+                                  + (f" · {r.sector}" if r.sector else "")
+                                  + " — not in universe; theme + add",
+                        "as_of": TODAY,
+                    })
+            print(f"   candidates: {cand_total} liquid names not in universe"
+                  + (f" (showing top {CAND_CAP})" if cand_total > CAND_CAP else ""))
+    except Exception as e:
+        print("   (candidate screen skipped:", e, ")")
     rev = pd.DataFrame(review_rows, columns=["section", "ticker", "name", "themes", "detail", "as_of"])
     if rev.empty:
         rev = pd.DataFrame([{"section": "ok", "ticker": "-", "name": None,
