@@ -61,8 +61,7 @@ SELECT
   DATE_DIFF(MAX(o.date), MIN(o.date), DAY) + 1 AS span_days,
   MAX(o.date) = ANY_VALUE(l.d)        AS is_current          -- still leading as of the latest date
 FROM onlead o CROSS JOIN latest l
-GROUP BY o.ticker, o.category, (o.dn - o.ln)
-ORDER BY o.category, o.ticker, spell_start;
+GROUP BY o.ticker, o.category, (o.dn - o.ln);
 
 -- 3) CURRENT snapshot (VIEW) — who is leading right now, per category. Feeds the Leaders tab's
 --    "leading now" blocks and the quick current-list export.
