@@ -10,6 +10,11 @@ Then rebuilds stock_theme_map ONCE, backfills full price history for any newly-A
 (so they're usable immediately, not only after the Sunday full reset), and marks the processed
 queue rows status='done' ('error' if a sub_theme didn't exist — never silently dropped).
 
+On a theme change it ALSO re-runs the two deep-history backfills that use current membership applied
+backward — the leader/tier bands (leader_tier_backfill.sql, to 1962) and the deep theme-RS SCORE
+history (theme_rs_score_history_deep_backfill.sql, to 1993) — so backtest history stays in sync with
+the map. Both must sit at the repo root. The HEAVY theme_rs_history_deep is deliberately left MANUAL.
+
 BACKUPS: whenever a Submit actually changes tickers.txt, the PRE-change file is snapshotted into
 tickers_backups/ and only the newest 3 are kept — so you always have the last 3 changed versions to
 roll back to. Backups accrue on real changes only, never on a quiet nightly.
@@ -229,6 +234,24 @@ def rebuild_leader_tier():
         print(f"   (leader_tier backfill failed, non-fatal: {e})")
 
 
+def rebuild_theme_rs_score_deep():
+    """Theme membership just changed -> the DEEP theme-RS SCORE history (current members applied back
+    to 1993) shifts too, so re-run its one-time backfill (theme_rs_score_history_deep_backfill.sql at
+    the repo root). It's year-chunked and cheap enough to redo on a theme change — mirrors the
+    leader_tier pattern. The HEAVY theme_rs_history_deep (40-day self-join + JS UDFs) is left MANUAL
+    on purpose and is NOT run here. Best-effort — a failure is logged, not fatal (the nightly sql/04
+    still refreshes the rolling recent window the sheet reads)."""
+    p = Path("theme_rs_score_history_deep_backfill.sql")
+    if not p.exists():
+        print("   (theme_rs_score deep backfill skipped — theme_rs_score_history_deep_backfill.sql not found in repo root)")
+        return
+    try:
+        bq.query(p.read_text()).result()
+        print("   theme_rs_score_history_deep rebuilt (theme change -> deep score history refreshed).")
+    except Exception as e:
+        print(f"   (theme_rs_score deep backfill failed, non-fatal: {e})")
+
+
 # ---- full-history backfill for newly-added names ----------------------------
 def backfill_history(new_adds):
     """Pull FULL history for freshly-added tickers and upsert into price_history, so a name added
@@ -339,7 +362,8 @@ def reconcile():
     if theme_ok or removes:
         rebuild_stock_theme_map()
         print("   stock_theme_map rebuilt (theme SQL 03/06/15 refresh later in this nightly).")
-        rebuild_leader_tier()   # theme membership changed -> refresh the full historical leader/tier bands
+        rebuild_leader_tier()          # theme change -> refresh the full historical leader/tier bands
+        rebuild_theme_rs_score_deep()  # + the deep theme-RS SCORE history (cheap; heavy theme_rs_history_deep stays manual)
 
     # 3) backfill history for genuinely-new names (added to the file this run).
     backfill_history(added)
