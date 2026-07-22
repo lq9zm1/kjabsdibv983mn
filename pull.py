@@ -1,57 +1,62 @@
 #!/usr/bin/env python3
 """
-pull.py  —  EODHD full-history price puller (drop-in replacement for the yfinance version).
+pull.py  —  EODHD price puller.  Two modes:
+    pull_prices(tickers)        -> (DataFrame, failed_list)   FULL history, 1 call/ticker.
+                                   Used for the WEEKLY reset (Sunday) — self-heals splits/divs.
+    pull_recent(tickers, days)  -> (DataFrame, complete_ok)   INCREMENTAL, last `days` cal days
+                                   via eod-bulk-last-day/US (one request per day = whole US market,
+                                   filtered to curated in code). Used on weekday nightlies.
 
-Returns a DataFrame matching the BigQuery price_history schema:
+Returns rows matching the BigQuery price_history schema:
     ticker, date, open, high, low, close, adj_close, volume
 
 Contract preserved for run_nightly.py:
     pull_prices(tickers) -> (DataFrame, failed_list)
-    to_yahoo(t)          -> EODHD symbol mapper (kept same name so run_nightly's
-                            metadata step `yf.Ticker(pullmod.to_yahoo(t))` still calls it;
-                            see NOTE at bottom about the .info metadata step)
+    to_yahoo(t)          -> EODHD symbol mapper (kept same name; run_nightly's metadata step
+                            yf.Ticker(pullmod.to_yahoo(t)) still calls it).
 
-KEY DIFFERENCES vs yfinance:
-  - One EODHD call per ticker = full history (period=d). ~3,062 calls/night = ~3% of
-    the 100,000/day limit. (Bulk-last-day incremental is a LATER optimization.)
-  - EODHD adjusted_close is split+dividend adjusted (matches TradingView). We map it
-    to adj_close. EODHD 'close' is the raw/unadjusted close -> close.
-  - US tickers use the .US suffix. Dotted tickers (BRK.B) -> BRK-B.US on EODHD.
+KEY POINTS:
+  - EODHD adjusted_close is split+dividend adjusted (matches TradingView) -> adj_close.
+    'close' is the raw/unadjusted close -> close.
+  - US tickers use the .US suffix for the per-ticker EOD endpoint. Dotted tickers (BRK.B) -> BRK-B.
+  - eod-bulk-last-day/US costs 100 API units per request; 7 days = 700 units (vs a 100k/day limit).
 
-SETUP:
-  - requires: requests, pandas
-  - API key from env var EODHD_API_KEY  (GitHub Actions secret), falls back to a
-    local constant for manual runs.
+API key from env EODHD_API_KEY (GitHub Actions secret), falls back to a local constant.
 """
-
 import os
 import re
 import sys
 import time
+from datetime import date as _date, timedelta
 from pathlib import Path
 
 import pandas as pd
 import requests
 
 # ---- config -----------------------------------------------------------------
-# Key resolution order: env var (GitHub Actions secret) -> local constant.
 EODHD_API_KEY = os.environ.get("EODHD_API_KEY", "PASTE_KEY_FOR_LOCAL_RUNS")
 BASE = "https://eodhd.com/api/eod"
+BULK = "https://eodhd.com/api/eod-bulk-last-day/US"
 FROM = "1900-01-01"            # full history; EODHD returns from inception
-PAUSE_SEC = 0.05              # gentle spacing; 1000 req/min limit = 16/s, this is well under
+PAUSE_SEC = 0.05
 TIMEOUT = 60
-RETRY = 2                      # per-ticker retries on transient errors
+RETRY = 2                      # per-request retries on transient errors
 COLS = ["ticker", "date", "open", "high", "low", "close", "adj_close", "volume"]
 
 
+def _norm(t: str) -> str:
+    return str(t).upper().strip().replace(".", "-").replace("/", "-")
+
+
 def to_yahoo(t: str) -> str:
-    """EODHD symbol for a US ticker. (Name kept for run_nightly compatibility.)
-    BRK.B -> BRK-B.US ; dotted/class shares use '-' like Yahoo, plus '.US' exchange."""
+    """EODHD symbol for a US ticker. (Name kept for run_nightly compatibility.)"""
     return t.replace(".", "-") + ".US"
 
 
+# ============================================================================
+# FULL history (weekly reset)
+# ============================================================================
 def _pull_one(eod_symbol):
-    """Return list-of-dict rows for one EODHD symbol, or None on failure."""
     url = f"{BASE}/{eod_symbol}"
     params = {"api_token": EODHD_API_KEY, "from": FROM, "period": "d", "fmt": "json"}
     for attempt in range(RETRY + 1):
@@ -60,10 +65,8 @@ def _pull_one(eod_symbol):
             if r.status_code == 200:
                 data = r.json()
                 return data if isinstance(data, list) else []
-            # 404 = symbol not on EODHD; don't retry
             if r.status_code == 404:
                 return None
-            # 429/5xx = transient; back off and retry
             time.sleep(0.5 * (attempt + 1))
         except Exception:
             time.sleep(0.5 * (attempt + 1))
@@ -71,18 +74,17 @@ def _pull_one(eod_symbol):
 
 
 def _frame(rows, original_ticker):
-    """EODHD JSON rows -> price_history-schema DataFrame for one ticker."""
     recs = []
     for bar in rows:
         try:
             recs.append({
                 "ticker":    original_ticker,
-                "date":      bar["date"],                       # 'YYYY-MM-DD'
+                "date":      bar["date"],
                 "open":      float(bar["open"]),
                 "high":      float(bar["high"]),
                 "low":       float(bar["low"]),
-                "close":     float(bar["close"]),               # raw close
-                "adj_close": float(bar["adjusted_close"]),      # split+div adjusted (TV-match)
+                "close":     float(bar["close"]),
+                "adj_close": float(bar["adjusted_close"]),
                 "volume":    bar.get("volume", 0),
             })
         except (KeyError, TypeError, ValueError):
@@ -93,18 +95,15 @@ def _frame(rows, original_ticker):
 
 
 def pull_prices(tickers):
-    """Pull full-history OHLCV for a list of (already-cleaned) ticker strings.
-    Returns (DataFrame, failed_list_of_original_tickers)."""
+    """FULL-history OHLCV for a list of tickers. Returns (DataFrame, failed_list)."""
     if EODHD_API_KEY in ("", "PASTE_KEY_FOR_LOCAL_RUNS") and "EODHD_API_KEY" not in os.environ:
-        print("WARNING: EODHD_API_KEY not set (env var or local constant). Calls will 401.",
-              flush=True)
+        print("WARNING: EODHD_API_KEY not set. Calls will 401.", flush=True)
 
-    emap = {to_yahoo(t): t for t in tickers}     # eodhd symbol -> original ticker
+    emap = {to_yahoo(t): t for t in tickers}
     frames, failed = [], []
     syms = list(emap.keys())
     total = len(syms)
-
-    BATCH_LOG = max(1, total // 100)             # ~100 progress lines like the old batches
+    BATCH_LOG = max(1, total // 100)
     for i, esym in enumerate(syms, 1):
         if i % BATCH_LOG == 0 or i == total:
             print(f"  {i}/{total} ...", flush=True)
@@ -119,7 +118,6 @@ def pull_prices(tickers):
 
     if not frames:
         return pd.DataFrame(columns=COLS), sorted({emap.get(f, f) for f in set(failed)})
-
     out = pd.concat(frames, ignore_index=True)
     out = out.dropna(subset=["close"])
     out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
@@ -127,6 +125,75 @@ def pull_prices(tickers):
     out = out[COLS]
     failed_orig = sorted({emap.get(f, f) for f in set(failed)})
     return out, failed_orig
+
+
+# ============================================================================
+# INCREMENTAL (nightly) — last N days via eod-bulk-last-day/US
+# ============================================================================
+def _bulk_one_day(day):
+    """One eod-bulk-last-day/US request for a date. Returns list of row dicts (or None on failure)."""
+    params = {"api_token": EODHD_API_KEY, "date": day.isoformat(), "fmt": "json"}
+    for attempt in range(RETRY + 1):
+        try:
+            r = requests.get(BULK, params=params, timeout=TIMEOUT)
+            if r.status_code == 200:
+                data = r.json()
+                return data if isinstance(data, list) else []
+            time.sleep(0.5 * (attempt + 1))
+        except Exception:
+            time.sleep(0.5 * (attempt + 1))
+    return None                                  # all retries failed
+
+
+def pull_recent(tickers, days=7):
+    """Last `days` calendar days for the curated tickers, via bulk-last-day (1 request/day).
+    Returns (DataFrame in COLS schema, complete_ok). complete_ok=False if the fetch looks
+    incomplete (a day's request failed, or too few tickers came back) so the caller can ABORT
+    rather than write partial data."""
+    if EODHD_API_KEY in ("", "PASTE_KEY_FOR_LOCAL_RUNS") and "EODHD_API_KEY" not in os.environ:
+        print("WARNING: EODHD_API_KEY not set. Calls will 401.", flush=True)
+
+    keep = {_norm(t) for t in tickers}
+    frames, failures = [], 0
+    today = _date.today()
+    for d in range(days):
+        day = today - timedelta(days=d)
+        if day.weekday() >= 5:                   # skip Sat/Sun (no trading -> empty)
+            continue
+        rows = _bulk_one_day(day)
+        if rows is None:                         # request failed after retries
+            failures += 1
+            print(f"  bulk {day} FAILED after retries", flush=True)
+            continue
+        recs = []
+        for b in rows:
+            code = _norm(b.get("code", ""))
+            if code not in keep:
+                continue
+            try:
+                recs.append({
+                    "ticker": code, "date": b["date"],
+                    "open": float(b["open"]), "high": float(b["high"]),
+                    "low": float(b["low"]), "close": float(b["close"]),
+                    "adj_close": float(b["adjusted_close"]), "volume": b.get("volume", 0),
+                })
+            except (KeyError, TypeError, ValueError):
+                continue
+        if recs:
+            frames.append(pd.DataFrame.from_records(recs))
+            print(f"  bulk {day}: {len(recs)} curated rows", flush=True)
+        time.sleep(PAUSE_SEC)
+
+    if not frames:
+        return pd.DataFrame(columns=COLS), False
+    out = pd.concat(frames, ignore_index=True).drop_duplicates(subset=["ticker", "date"])
+    out = out.dropna(subset=["close"])
+    out["date"] = pd.to_datetime(out["date"]).dt.strftime("%Y-%m-%d")
+    out["volume"] = pd.to_numeric(out["volume"], errors="coerce").fillna(0).astype("int64")
+    out = out[COLS]
+    # completeness gate: NO failed days, and a healthy fraction of curated came back.
+    complete_ok = (failures == 0) and (out["ticker"].nunique() >= 0.5 * max(1, len(keep)))
+    return out, complete_ok
 
 
 def _load_tickers(path):
