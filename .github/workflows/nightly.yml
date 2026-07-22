@@ -4,13 +4,15 @@ on:
     - cron: "23 6 * * *"    # 1:23 AM CDT — primary (odd minute, less congested)
     - cron: "47 9 * * *"    # 4:47 AM CDT — backup (catches any skip; EOD definitely ready)
   workflow_dispatch: {}
+permissions:
+  contents: write            # step 0 (apply_review_actions) commits tickers.txt back to the repo
 jobs:
   nightly:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4    # persist-credentials defaults true -> git push works
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
