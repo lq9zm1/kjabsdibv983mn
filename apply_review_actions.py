@@ -213,6 +213,22 @@ def rebuild_stock_theme_map():
     """).result()
 
 
+def rebuild_leader_tier():
+    """Theme membership just changed -> the historical leader/tier BANDS shift, so re-run the full
+    backfill (leader_tier_backfill.sql at the repo root) as one multi-statement script. This is the
+    ONLY time the 1962+ history is rebuilt; normal nights leave it alone. Best-effort — a failure is
+    logged, not fatal (the nightly's own sql/16 step still upserts the recent day)."""
+    p = Path("leader_tier_backfill.sql")
+    if not p.exists():
+        print("   (leader_tier backfill skipped — leader_tier_backfill.sql not found in repo root)")
+        return
+    try:
+        bq.query(p.read_text()).result()
+        print("   leader_tier full-history rebuilt (theme change -> historical bands refreshed).")
+    except Exception as e:
+        print(f"   (leader_tier backfill failed, non-fatal: {e})")
+
+
 # ---- full-history backfill for newly-added names ----------------------------
 def backfill_history(new_adds):
     """Pull FULL history for freshly-added tickers and upsert into price_history, so a name added
@@ -323,6 +339,7 @@ def reconcile():
     if theme_ok or removes:
         rebuild_stock_theme_map()
         print("   stock_theme_map rebuilt (theme SQL 03/06/15 refresh later in this nightly).")
+        rebuild_leader_tier()   # theme membership changed -> refresh the full historical leader/tier bands
 
     # 3) backfill history for genuinely-new names (added to the file this run).
     backfill_history(added)
