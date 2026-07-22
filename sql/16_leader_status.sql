@@ -8,6 +8,11 @@
 -- exist (from the backfill). Goes in sql/, runs AFTER 15_leader_engine.
 -- ============================================================================
 
+-- Compute the recent-window floor ONCE (a table-subquery can't live inside a MERGE ON predicate).
+DECLARE recent_floor DATE DEFAULT (
+  SELECT DATE_SUB(MAX(date), INTERVAL 7 DAY) FROM `stonks-498420.stonks_data.bt_leader_daily`
+);
+
 -- 1) RECENT-DAY UPSERT — recompute only the last 7 days' tier (their bands use only those days' members).
 MERGE `stonks-498420.stonks_data.leader_tier_daily` T
 USING (
@@ -17,7 +22,7 @@ USING (
     JOIN `stonks-498420.stonks_data.stock_theme_map` s
       ON REGEXP_REPLACE(UPPER(s.ticker), r'[./]', '-') = l.ticker
     WHERE s.sub_theme IS NOT NULL
-      AND l.date >= (SELECT DATE_SUB(MAX(date), INTERVAL 7 DAY) FROM `stonks-498420.stonks_data.bt_leader_daily`)
+      AND l.date >= recent_floor
   ),
   bands AS (SELECT theme, date, AVG(group_score) AS avg_gs, STDDEV_SAMP(group_score) AS spread FROM gs GROUP BY theme, date),
   ranges AS (
@@ -40,7 +45,7 @@ USING (
   FROM gs g JOIN ranges r USING (theme, date)
 ) S
 ON  T.ticker = S.ticker AND T.theme = S.theme AND T.date = S.date
-    AND T.date >= (SELECT DATE_SUB(MAX(date), INTERVAL 7 DAY) FROM `stonks-498420.stonks_data.bt_leader_daily`)
+    AND T.date >= recent_floor
 WHEN MATCHED THEN UPDATE SET
   main_theme = S.main_theme, etf = S.etf, group_score = S.group_score, rs_rsp = S.rs_rsp,
   upper_range = S.upper_range, lower_range = S.lower_range, leader_tier = S.leader_tier
