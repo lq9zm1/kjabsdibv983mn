@@ -25,13 +25,16 @@ FROM `stonks-498420.stonks_data.bt_leader_daily`;
 -- ---- (B) THEME tier: adaptive group_score band = your Theme View / v_stock_dashboard.theme_rank -----
 CREATE OR REPLACE TABLE `stonks-498420.stonks_data.leader_tier_daily`
 PARTITION BY DATE_TRUNC(date, MONTH) CLUSTER BY theme, ticker AS
-WITH gs AS (   -- per (ticker, theme, date): CORRECTED group_score = AVG of the 5 returns, NO atr_pct
-  SELECT m.ticker, m.date, s.sub_theme AS theme, s.main_theme, s.etf,
-    (SELECT AVG(x) FROM UNNEST([m.ret_1d, m.ret_1w, m.ret_1m, m.ret_3m, m.ret_6m]) x) AS group_score,
-    m.rs_value_21d AS stock_rs
-  FROM `stonks-498420.stonks_data.metrics_daily` m
-  JOIN `stonks-498420.stonks_data.stock_theme_map` s ON s.ticker = m.ticker
+WITH gs AS (   -- per (ticker, theme, date): group_score = AVG of the 5 returns (NO atr_pct). Sourced from
+               -- bt_leader_daily (sql/15), which already computes that average HISTORICALLY over full
+               -- price_history — metrics_daily is a LATEST-ONLY snapshot, so it can't feed the history.
+  SELECT l.ticker, l.date, s.sub_theme AS theme, s.main_theme, s.etf,
+    l.group_score,        -- = AVG(ret_1d,1w,1m,3m,6m) — the corrected form (matches theme_stats + fixed v_stock_dashboard)
+    l.rs_rsp              -- historical leader-hunter RS (Mansfield rs_value_21d is latest-only, not kept here)
+  FROM `stonks-498420.stonks_data.bt_leader_daily` l
+  JOIN `stonks-498420.stonks_data.stock_theme_map` s ON s.ticker = l.ticker
   WHERE s.sub_theme IS NOT NULL
+    AND l.date >= DATE '2005-01-01'   -- covers the backtest fires (earliest ~2005-06); widen for more history
 ),
 bands AS (   -- per (theme, date): mean + spread of member group_scores (theme_stats logic, sql/03)
   SELECT theme, date, AVG(group_score) AS avg_gs, STDDEV_SAMP(group_score) AS spread
@@ -50,7 +53,7 @@ ranges AS (   -- adaptive band: avg ± spread × volatility-scaled multiplier
   )
 )
 SELECT g.ticker, g.date, g.theme, g.main_theme, g.etf,
-  ROUND(g.group_score, 4) AS group_score, g.stock_rs,
+  ROUND(g.group_score, 4) AS group_score, g.rs_rsp,
   ROUND(r.upper_range, 4) AS upper_range, ROUND(r.lower_range, 4) AS lower_range,
   CASE WHEN g.group_score IS NULL OR g.theme IS NULL THEN NULL
        WHEN g.group_score > r.upper_range THEN 'Leader'
@@ -92,7 +95,7 @@ FROM spells;
 CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_leader_tier_current` AS
 WITH latest AS (SELECT MAX(date) AS d FROM `stonks-498420.stonks_data.leader_tier_daily`),
 cur AS (
-  SELECT t.ticker, t.theme, t.main_theme, t.etf, t.group_score, t.stock_rs, t.leader_tier AS current_tier
+  SELECT t.ticker, t.theme, t.main_theme, t.etf, t.group_score, t.rs_rsp, t.leader_tier AS current_tier
   FROM `stonks-498420.stonks_data.leader_tier_daily` t, latest
   WHERE t.date = latest.d
 ),
@@ -104,7 +107,7 @@ recency AS (   -- last day each (ticker,theme) sat in each tier — these ARE th
   FROM `stonks-498420.stonks_data.leader_tier_daily`
   GROUP BY ticker, theme
 )
-SELECT c.ticker, c.theme, c.main_theme, c.etf, c.group_score, c.stock_rs, c.current_tier,
+SELECT c.ticker, c.theme, c.main_theme, c.etf, c.group_score, c.rs_rsp, c.current_tier,
   rc.last_leader_date, rc.last_mid_date, rc.last_laggard_date,
   DATE_DIFF((SELECT d FROM latest), rc.last_leader_date,  DAY) AS days_since_leader,
   DATE_DIFF((SELECT d FROM latest), rc.last_mid_date,     DAY) AS days_since_mid,
