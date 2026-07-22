@@ -22,7 +22,7 @@ import re
 import sys
 import io
 import time
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -124,9 +124,12 @@ def directory_sync(curated):
 
 
 # ---- 2-3. pull + load  (day-aware: Sunday = FULL reset, weekdays = INCREMENTAL) --------------
-FULL_PULL_WEEKDAY = 6     # Mon=0 .. Sun=6.  Sunday -> full-history WRITE_TRUNCATE (self-heals
-                          # splits/divs); every other day -> incremental last-7d upsert.
-                          # First run (no table yet) also goes full.
+FULL_PULL_WEEKDAY = 6     # Mon=0 .. Sun=6.  Sunday -> re-pull the last SELF_HEAL_YEARS and MERGE-upsert
+                          # (catches recent splits/divs) — NOT a full 1962 re-pull. Every other day ->
+                          # incremental last-7d upsert. Deep history is a ONE-TIME backfill (below).
+SELF_HEAL_YEARS = 2       # Sunday split/div self-heal window. Deep history (pre-window) is loaded once
+                          # (first run / manual backfill) and never re-fetched — matches the W6 cost-guard
+                          # pattern (bounded nightly windows, deep history via one-time backfill).
 
 _PRICE_SCHEMA = [
     bigquery.SchemaField("ticker", "STRING"),
@@ -179,11 +182,13 @@ def _merge_recent(df):
 
 
 def pull_and_load(pull_list):
-    is_full = (TODAY.weekday() == FULL_PULL_WEEKDAY) or (not table_exists("price_history"))
-    print(f"2. pulling prices — {'FULL history (weekly reset)' if is_full else 'INCREMENTAL (last 7d upsert)'} ...",
-          flush=True)
+    first_run = not table_exists("price_history")
+    is_sunday = (TODAY.weekday() == FULL_PULL_WEEKDAY)
 
-    if is_full:
+    # ONE-TIME deep load: only when the table doesn't exist yet (or a manual backfill). Full 1962+ history,
+    # WRITE_TRUNCATE. This is the deep backfill — it does NOT recur weekly.
+    if first_run:
+        print("2. pulling prices — ONE-TIME FULL history (table missing) ...", flush=True)
         df, failed = pullmod.pull_prices(pull_list)
         n = df["ticker"].nunique() if not df.empty else 0
         print(f"   pulled {len(df):,} rows for {n} tickers  | failed: {len(failed)}")
@@ -193,7 +198,23 @@ def pull_and_load(pull_list):
         _load_full(df)
         return failed
 
-    # incremental: fetch recent window (retries inside pull_recent), verify COMPLETE, then upsert.
+    # SUNDAY self-heal: re-pull only the last SELF_HEAL_YEARS per ticker and MERGE-upsert (catches recent
+    # splits/divs). Deep history (pre-window) is left untouched — no weekly 1962 re-pull.
+    if is_sunday:
+        frm = (TODAY - timedelta(days=365 * SELF_HEAL_YEARS + 5)).isoformat()
+        print(f"2. pulling prices — SUNDAY self-heal (last {SELF_HEAL_YEARS}y from {frm}, upsert) ...", flush=True)
+        df, failed = pullmod.pull_prices(pull_list, from_date=frm)
+        n = df["ticker"].nunique() if not df.empty else 0
+        print(f"   pulled {len(df):,} rows for {n} tickers  | failed: {len(failed)}")
+        if df.empty:
+            print("   !! self-heal pull returned no data — price_history LEFT UNCHANGED.", flush=True)
+            return failed
+        print("3. merging self-heal window into price_history (upsert) ...", flush=True)
+        _merge_recent(df)
+        return failed
+
+    # WEEKDAYS: incremental last-7d via bulk (retries inside pull_recent), verify COMPLETE, then upsert.
+    print("2. pulling prices — INCREMENTAL (last 7d upsert) ...", flush=True)
     df, complete_ok = pullmod.pull_recent(pull_list, days=7)
     n = df["ticker"].nunique() if not df.empty else 0
     print(f"   recent pull: {len(df):,} rows, {n} tickers  | complete={complete_ok}")
