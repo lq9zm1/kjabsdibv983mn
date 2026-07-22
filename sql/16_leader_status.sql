@@ -1,73 +1,110 @@
 -- ============================================================================
--- 16_leader_status — boolean leader flags + historical SPELLS for the 3 leader
--- categories, layered on bt_leader_daily (sql/15). Gives you:
---   • v_leader_status_daily — point-in-time TRUE/FALSE per (ticker,date) → the BACKTEST join source
---   • leader_spells         — one row per continuous leader run (became → fell out) → tab + list export
---   • v_leader_current      — latest-day snapshot of who is leading now
+-- 16_leader_status — historical leader signals for backtesting. Two families:
+--   (A) UNIVERSE + ETF leader flags — binary, from bt_leader_daily (sql/15), matching the Macro sheet.
+--   (B) THEME LEADER / MID / LAGGARD tier — the adaptive group_score BAND, identical to your Theme View
+--       (v_stock_dashboard.theme_rank), with the CORRECTED group_score = AVG of the 5 returns (NO atr_pct).
+--   Plus (C) the full tier STATE-CHANGE history (Leader→Mid→Laggard→Mid→Leader …) for transition backtests
+--   and (D) a current snapshot with days-since-last-Laggard / -Leader.
 --
--- THE 3 KNOBS — a ticker "is" a leader in a category when (tune these numbers):
---   universe_leader : universe_leader >= 80   (top 20% of the whole universe by composite momentum)
---   theme_leader    : theme_leader_rank = 1    (the single strongest name in its sub-theme that day)
---   etf_leader      : etf_leader > 0           (outperforming its own parent-ETF's 1-month return)
+-- ⚠ BACKEND SYNC (do right after deploying this): v_stock_dashboard's `d` CTE currently computes
+--   group_score = (SUM of 5 returns)/atr_pct. Fix it to the SAME AVG form used here so the live Theme
+--   View and this historical tier are identical:
+--     ROUND((SELECT AVG(x) FROM UNNEST([m.ret_1d,m.ret_1w,m.ret_1m,m.ret_3m,m.ret_6m]) x),4) AS group_score
 --
--- Runs nightly AFTER 15_leader_engine (filename sorts after it). Idempotent + nightly-safe.
+-- Grain: (A) per (ticker,date) full history; (B)-(D) per (ticker,theme,date), history = metrics_daily (2024-01-01+).
+-- Runs nightly AFTER 15_leader_engine. Idempotent + nightly-safe.
 -- ============================================================================
 
--- 1) DAILY point-in-time flags (VIEW). Join your backtest fires to this on (ticker,date) to know,
---    as of any date, whether the name was a universe / theme / etf leader. Booleans never NULL.
+-- ---- (A) UNIVERSE + ETF binary flags (Macro-matching) — the point-in-time backtest join source -----
 CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_leader_status_daily` AS
-SELECT
-  ticker, date, sub_theme,
-  group_score, ext, rs_rsp,
-  universe_leader, theme_leader_pct, theme_leader_rank, etf_leader,
-  COALESCE(universe_leader >= 80, FALSE) AS is_universe_leader,     -- KNOB 1
-  COALESCE(theme_leader_rank = 1,  FALSE) AS is_theme_leader,        -- KNOB 2
-  COALESCE(etf_leader > 0,         FALSE) AS is_etf_leader           -- KNOB 3
+SELECT ticker, date, sub_theme, group_score, ext, rs_rsp, universe_leader, etf_leader,
+  COALESCE(universe_leader >= 80, FALSE) AS is_universe_leader,   -- top 20% of the universe (Macro n_strong_80)
+  COALESCE(etf_leader > 0,        FALSE) AS is_etf_leader          -- beating its own ETF's 1M (Macro n_beating_own_etf)
 FROM `stonks-498420.stonks_data.bt_leader_daily`;
 
--- 2) SPELLS (TABLE, rebuilt nightly). One row per continuous run of leader days per ticker per
---    category: spell_start = the day it BECAME a leader, spell_end = last leader day, is_current =
---    still leading as of the latest date. Islands are on consecutive TRADING days (weekend/holiday
---    gaps don't split a run) via the (all-day rank − leader-day rank) trick.
-CREATE OR REPLACE TABLE `stonks-498420.stonks_data.leader_spells`
-CLUSTER BY category, ticker AS
-WITH src AS (
-  SELECT ticker, date, sub_theme, is_universe_leader, is_theme_leader, is_etf_leader
-  FROM `stonks-498420.stonks_data.v_leader_status_daily`
-  WHERE date >= DATE '2023-01-01'          -- SPELLS HISTORY FLOOR — widen for more backtest history
+-- ---- (B) THEME tier: adaptive group_score band = your Theme View / v_stock_dashboard.theme_rank -----
+CREATE OR REPLACE TABLE `stonks-498420.stonks_data.leader_tier_daily`
+PARTITION BY DATE_TRUNC(date, MONTH) CLUSTER BY theme, ticker AS
+WITH gs AS (   -- per (ticker, theme, date): CORRECTED group_score = AVG of the 5 returns, NO atr_pct
+  SELECT m.ticker, m.date, s.sub_theme AS theme, s.main_theme, s.etf,
+    (SELECT AVG(x) FROM UNNEST([m.ret_1d, m.ret_1w, m.ret_1m, m.ret_3m, m.ret_6m]) x) AS group_score,
+    m.rs_value_21d AS stock_rs
+  FROM `stonks-498420.stonks_data.metrics_daily` m
+  JOIN `stonks-498420.stonks_data.stock_theme_map` s ON s.ticker = m.ticker
+  WHERE s.sub_theme IS NOT NULL
 ),
-long AS (
-  SELECT ticker, date, 'universe' AS category, sub_theme, is_universe_leader AS is_leader FROM src
-  UNION ALL SELECT ticker, date, 'theme', sub_theme, is_theme_leader FROM src
-  UNION ALL SELECT ticker, date, 'etf',   sub_theme, is_etf_leader   FROM src
+bands AS (   -- per (theme, date): mean + spread of member group_scores (theme_stats logic, sql/03)
+  SELECT theme, date, AVG(group_score) AS avg_gs, STDDEV_SAMP(group_score) AS spread
+  FROM gs GROUP BY theme, date
 ),
-seq AS (   -- dn = rank over ALL days; ln (below) = rank over leader-only days
-  SELECT ticker, category, sub_theme, date, is_leader,
-    ROW_NUMBER() OVER (PARTITION BY ticker, category ORDER BY date) AS dn
-  FROM long
-),
-onlead AS (
-  SELECT ticker, category, sub_theme, date, dn,
-    ROW_NUMBER() OVER (PARTITION BY ticker, category ORDER BY date) AS ln
-  FROM seq WHERE is_leader
-),
-latest AS ( SELECT MAX(date) AS d FROM `stonks-498420.stonks_data.bt_leader_daily` )
-SELECT
-  o.ticker, o.category,
-  ANY_VALUE(o.sub_theme)              AS sub_theme,
-  MIN(o.date)                         AS spell_start,        -- BECAME a leader
-  MAX(o.date)                         AS spell_end,          -- last leader day (fell out the next session)
-  COUNT(*)                            AS n_leader_days,
-  DATE_DIFF(MAX(o.date), MIN(o.date), DAY) + 1 AS span_days,
-  MAX(o.date) = ANY_VALUE(l.d)        AS is_current          -- still leading as of the latest date
-FROM onlead o CROSS JOIN latest l
-GROUP BY o.ticker, o.category, (o.dn - o.ln);
+ranges AS (   -- adaptive band: avg ± spread × volatility-scaled multiplier
+  SELECT theme, date, avg_gs, spread,
+    avg_gs + spread * mult AS upper_range,
+    avg_gs - spread * mult AS lower_range
+  FROM (
+    SELECT theme, date, avg_gs, spread,
+      CASE WHEN SAFE_DIVIDE(spread, avg_gs) < 0.3 THEN 0.4
+           WHEN SAFE_DIVIDE(spread, avg_gs) < 0.6 THEN 0.6
+           WHEN SAFE_DIVIDE(spread, avg_gs) < 1   THEN 0.8 ELSE 1 END AS mult
+    FROM bands
+  )
+)
+SELECT g.ticker, g.date, g.theme, g.main_theme, g.etf,
+  ROUND(g.group_score, 4) AS group_score, g.stock_rs,
+  ROUND(r.upper_range, 4) AS upper_range, ROUND(r.lower_range, 4) AS lower_range,
+  CASE WHEN g.group_score IS NULL OR g.theme IS NULL THEN NULL
+       WHEN g.group_score > r.upper_range THEN 'Leader'
+       WHEN g.group_score < r.lower_range THEN 'Laggard'
+       ELSE 'Mid' END AS leader_tier
+FROM gs g JOIN ranges r USING (theme, date);
 
--- 3) CURRENT snapshot (VIEW) — who is leading right now, per category. Feeds the Leaders tab's
---    "leading now" blocks and the quick current-list export.
-CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_leader_current` AS
-SELECT ticker, sub_theme,
-  universe_leader, theme_leader_pct, theme_leader_rank, etf_leader, rs_rsp, ext,
-  is_universe_leader, is_theme_leader, is_etf_leader
-FROM `stonks-498420.stonks_data.v_leader_status_daily`
-WHERE date = (SELECT MAX(date) FROM `stonks-498420.stonks_data.bt_leader_daily`);
+-- ---- (C) TIER STATE-CHANGE spells: one row per continuous tier run per (ticker, theme) -------------
+--      Ordered by spell_start it reads as the full path: Leader→Mid→Laggard→Mid→Leader …
+--      prev_tier / next_tier make each transition explicit (prev='Laggard', tier='Mid' = climbed out;
+--      prev='Leader', tier='Mid' = slipped). Islands are on tier-VALUE change (weekend gaps don't split).
+CREATE OR REPLACE TABLE `stonks-498420.stonks_data.leader_tier_spells`
+CLUSTER BY ticker, theme AS
+WITH seq AS (
+  SELECT ticker, theme, date, leader_tier,
+    LAG(leader_tier) OVER (PARTITION BY ticker, theme ORDER BY date) AS prev_day_tier
+  FROM `stonks-498420.stonks_data.leader_tier_daily`
+  WHERE leader_tier IS NOT NULL
+),
+marked AS (   -- running count of tier changes = a stable id per continuous tier run
+  SELECT ticker, theme, date, leader_tier,
+    COUNTIF(prev_day_tier IS NULL OR leader_tier != prev_day_tier)
+      OVER (PARTITION BY ticker, theme ORDER BY date ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS spell_id
+  FROM seq
+),
+spells AS (
+  SELECT ticker, theme, ANY_VALUE(leader_tier) AS tier,
+    MIN(date) AS spell_start, MAX(date) AS spell_end, COUNT(*) AS n_days,
+    MAX(date) = (SELECT MAX(date) FROM `stonks-498420.stonks_data.leader_tier_daily`) AS is_current
+  FROM marked
+  GROUP BY ticker, theme, spell_id
+)
+SELECT ticker, theme, tier, spell_start, spell_end, n_days, is_current,
+  LAG(tier)  OVER (PARTITION BY ticker, theme ORDER BY spell_start) AS prev_tier,   -- what it came FROM
+  LEAD(tier) OVER (PARTITION BY ticker, theme ORDER BY spell_start) AS next_tier    -- what it went TO
+FROM spells;
+
+-- ---- (D) CURRENT snapshot per (ticker, theme): tier now + recency of last Laggard / Leader ---------
+CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_leader_tier_current` AS
+WITH latest AS (SELECT MAX(date) AS d FROM `stonks-498420.stonks_data.leader_tier_daily`),
+cur AS (
+  SELECT t.ticker, t.theme, t.main_theme, t.etf, t.group_score, t.stock_rs, t.leader_tier AS current_tier
+  FROM `stonks-498420.stonks_data.leader_tier_daily` t, latest
+  WHERE t.date = latest.d
+),
+recency AS (   -- last day each (ticker,theme) was in each tier
+  SELECT ticker, theme,
+    MAX(IF(leader_tier = 'Laggard', date, NULL)) AS last_laggard_date,
+    MAX(IF(leader_tier = 'Leader',  date, NULL)) AS last_leader_date
+  FROM `stonks-498420.stonks_data.leader_tier_daily`
+  GROUP BY ticker, theme
+)
+SELECT c.ticker, c.theme, c.main_theme, c.etf, c.group_score, c.stock_rs, c.current_tier,
+  rc.last_laggard_date, rc.last_leader_date,
+  DATE_DIFF((SELECT d FROM latest), rc.last_laggard_date, DAY) AS days_since_laggard,   -- just-climbed-out signal
+  DATE_DIFF((SELECT d FROM latest), rc.last_leader_date,  DAY) AS days_since_leader
+FROM cur c LEFT JOIN recency rc USING (ticker, theme);
