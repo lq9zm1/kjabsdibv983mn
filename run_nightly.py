@@ -3,6 +3,8 @@
 run_nightly.py — Stonks nightly ingestion + rebuild orchestrator.
 
 Order:
+  0. Apply ticker_review Submits  (apply_review_actions: queued theme-adds / removes -> tickers.txt
+                                   + theme_map, BEFORE the universe is read, so they take effect tonight)
   1. Directory sync  (NASDAQ Trader = source of truth for valid/active tickers)
   2. Pull prices     (EODHD; Sunday = FULL history reset, weekdays = INCREMENTAL last-7d upsert)
   3. Load price_history  (Sunday: WRITE_TRUNCATE; weekdays: MERGE-upsert the recent window)
@@ -10,9 +12,10 @@ Order:
   5. Refresh tickers metadata  (new tickers only; keep last-known on failure)
   6. Write ticker_review table  (Delisted / No-data-streak / New listings / Candidates)
 
-The curated universe (tickers.txt) is NEVER auto-edited by THIS script, and stock_theme_map is
-NEVER auto-touched here. Confirmed-delisted are only skipped from the pull and surfaced in
-ticker_review for you to act on (the separate prune-delisted Action does the cleanup).
+tickers.txt / theme_map are edited ONLY by step 0's apply_review_actions module (which applies YOUR
+Submits and commits tickers.txt back) — the rebuild logic in THIS file never mutates them. Confirmed-
+delisted names you haven't actioned are skipped from the pull and surfaced in ticker_review; the
+separate weekly prune-delisted Action auto-cleans the ones confirmed >=3 nights.
 """
 import os
 import re
@@ -411,6 +414,16 @@ def write_review(curated, pull_list, absent, failed, new_syms):
 def main():
     T = {}
     def clk(): return time.perf_counter()
+    # 0. apply queued ticker_review Submits (theme-adds / removes) BEFORE reading the universe,
+    #    so an add is in tickers.txt for tonight's pull + theme rebuilds and a remove drops out.
+    #    Wrapped so a reconcile failure can NEVER abort the nightly.
+    t = clk()
+    try:
+        import apply_review_actions
+        apply_review_actions.reconcile()
+    except Exception as e:
+        print("0. (apply_review_actions skipped:", e, ")", flush=True)
+    T['0 apply review actions'] = clk() - t
     curated = load_curated()
     print(f"curated universe: {len(curated):,} tickers")
     t = clk(); pull_list, absent, new_syms = directory_sync(curated);   T['1 directory_sync'] = clk() - t
