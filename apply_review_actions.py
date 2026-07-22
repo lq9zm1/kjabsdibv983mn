@@ -9,6 +9,10 @@ Then rebuilds stock_theme_map ONCE, backfills full price history for any newly-A
 (so they're usable immediately, not only after the Sunday full reset), and marks the processed
 queue rows status='done' ('error' if a sub_theme didn't exist — never silently dropped).
 
+BACKUPS: whenever a Submit actually changes tickers.txt, the PRE-change file is snapshotted into
+tickers_backups/ and only the newest 3 are kept — so you always have the last 3 changed versions to
+roll back to. Backups accrue on real changes only, never on a quiet nightly.
+
 WIRED INTO run_nightly.py as STEP 0 — before the universe is read and prices are pulled — so a
 Submit takes effect on the very next nightly: adds flow into that night's price pull + theme
 rebuilds; removes drop out of the pull.
@@ -28,7 +32,7 @@ Requires: google-cloud-bigquery, pandas, requests (+ pull.py for the backfill).
 """
 import re
 import subprocess
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -38,6 +42,8 @@ PROJECT = "stonks-498420"
 DATASET = "stonks_data"
 TICKERS_FILE = "tickers.txt"
 ARCHIVE_FILE = "tickers_removed_archive.txt"
+BACKUP_DIR   = "tickers_backups"       # rolling pre-change snapshots of tickers.txt
+KEEP_BACKUPS = 3                       # keep only the newest N (last 3 changed versions)
 TR_ACTIONS = f"{PROJECT}.{DATASET}.ticker_review_actions"
 
 bq = bigquery.Client(project=PROJECT)
@@ -105,6 +111,24 @@ def add_to_tickers_file(symbols):
     return added
 
 
+def _rolling_backup(pre_text):
+    """Save the PRE-change tickers.txt into tickers_backups/, keeping only the newest KEEP_BACKUPS.
+    Called ONLY when a Submit actually changed the file — so backups accrue on real changes, never on
+    a quiet nightly. To roll back, just copy the wanted backup over tickers.txt and commit."""
+    if pre_text is None:
+        return
+    d = Path(BACKUP_DIR)
+    d.mkdir(exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dst = d / f"tickers_{ts}.txt"
+    dst.write_text(pre_text)
+    backups = sorted(d.glob("tickers_*.txt"))          # timestamped names sort chronologically
+    for old in backups[:-KEEP_BACKUPS]:
+        old.unlink()
+    kept = [p.name for p in sorted(d.glob("tickers_*.txt"))]
+    print(f"   backup: saved {dst.name} (pre-change) | keeping last {len(kept)}: {kept}")
+
+
 def prune_tickers_file(remove_norm):
     """Remove matching symbols from tickers.txt (bare-token, punctuation-insensitive). Returns removed."""
     if not remove_norm or not Path(TICKERS_FILE).exists():
@@ -131,7 +155,9 @@ def git_commit(added, removed):
     subprocess.run(["git", "config", "user.name", "stonks-bot"], check=True)
     subprocess.run(["git", "config", "user.email", "actions@users.noreply.github.com"], check=True)
     files = [TICKERS_FILE] + ([ARCHIVE_FILE] if Path(ARCHIVE_FILE).exists() else [])
-    subprocess.run(["git", "add", *files], check=True)
+    if Path(BACKUP_DIR).exists():
+        files.append(BACKUP_DIR)                       # commit the rolling backups too
+    subprocess.run(["git", "add", "-A", *files], check=True)   # -A also stages pruned old backups
     if subprocess.run(["git", "diff", "--cached", "--quiet"]).returncode == 0:
         print("   (no tickers.txt change to commit)")
         return
@@ -268,9 +294,13 @@ def reconcile():
     add_syms = sorted({t[0].upper() for t in theme_ok})
     rem_syms = sorted({t[0].upper() for t in removes})
 
-    # 1) tickers.txt FIRST (source of truth), commit + push. If push fails -> raise, DB untouched.
+    # 1) tickers.txt FIRST (source of truth): snapshot the pre-change file, edit, commit + push.
+    #    If push fails -> raise, DB untouched.
+    pre_text = Path(TICKERS_FILE).read_text() if Path(TICKERS_FILE).exists() else None
     added = add_to_tickers_file(add_syms)
     removed_from_file = prune_tickers_file({norm(t) for t in rem_syms})
+    if added or removed_from_file:
+        _rolling_backup(pre_text)                    # rolling last-3 backup — only when the file truly changed
     if removed_from_file:
         with open(ARCHIVE_FILE, "a") as f:
             for t in removed_from_file:
