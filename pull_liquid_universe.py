@@ -135,16 +135,31 @@ def main():
         return
 
     df = pd.DataFrame(all_rows)
+    print(f"raw screener rows: {len(df)}", flush=True)
+    if len(df):
+        print("  columns:", list(df.columns), flush=True)
+        print("  sample:", {k: df.iloc[0].get(k) for k in
+              ("code", "name", "exchange", "market_capitalization", "avgvol_200d", "adjusted_close")}, flush=True)
+        if "exchange" in df:
+            print("  exchanges:", df["exchange"].astype(str).value_counts().head(15).to_dict(), flush=True)
+    if "avgvol_200d" not in df.columns or "adjusted_close" not in df.columns:
+        print("!! screener response missing avgvol_200d / adjusted_close — see 'columns' above; aborting.")
+        return
     for c in ("market_capitalization", "avgvol_200d", "adjusted_close", "avgvol_1d"):
-        if c in df:
+        if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
     df["avg_dollar_vol"] = df["avgvol_200d"] * df["adjusted_close"]
 
-    # gates: US exchange, real $vol, drop warrant/unit/right suffixes, de-dupe
-    df = df[df["exchange"].isin(US_EXCHANGES)]
+    # gates — the endpoint is already /US, so only EXCLUDE OTC/pink (don't whitelist exchanges):
+    OTC = {"OTC", "OTCQB", "OTCQX", "OTCMKTS", "PINK", "GREY", "EXPM"}
+    if "exchange" in df.columns:
+        df = df[~df["exchange"].astype(str).str.upper().isin(OTC)]
+    print(f"after exchange filter: {len(df)}", flush=True)
     df = df[df["avg_dollar_vol"] >= MIN_DOLLAR_VOL]
-    df = df[~df["code"].astype(str).str.upper().str.contains(r"([.\-](WS|WT|U|R|RT))$|W$", na=False, regex=True)]
+    print(f"after >= ${MIN_DOLLAR_VOL/1e6:.0f}M avg $vol: {len(df)}", flush=True)
+    df = df[~df["code"].astype(str).str.upper().str.contains(r"[.\-](WS|WT|U|RT|R)$", na=False, regex=True)]
     df = df.dropna(subset=["code"]).drop_duplicates(subset=["code"])
+    print(f"after warrant/dedup: {len(df)}", flush=True)
 
     out = pd.DataFrame({
         "ticker": df["code"].astype(str).str.upper().str.strip(),
