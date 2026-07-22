@@ -56,9 +56,9 @@ def to_yahoo(t: str) -> str:
 # ============================================================================
 # FULL history (weekly reset)
 # ============================================================================
-def _pull_one(eod_symbol):
+def _pull_one(eod_symbol, from_date=FROM):
     url = f"{BASE}/{eod_symbol}"
-    params = {"api_token": EODHD_API_KEY, "from": FROM, "period": "d", "fmt": "json"}
+    params = {"api_token": EODHD_API_KEY, "from": from_date, "period": "d", "fmt": "json"}
     for attempt in range(RETRY + 1):
         try:
             r = requests.get(url, params=params, timeout=TIMEOUT)
@@ -94,8 +94,9 @@ def _frame(rows, original_ticker):
     return pd.DataFrame.from_records(recs)
 
 
-def pull_prices(tickers):
-    """FULL-history OHLCV for a list of tickers. Returns (DataFrame, failed_list)."""
+def pull_prices(tickers, from_date=FROM):
+    """OHLCV for a list of tickers from `from_date` (default = full history). Returns (DataFrame, failed_list).
+    Pass a recent from_date (e.g. ~2yr ago) for the weekly split/div self-heal so it doesn't re-fetch decades."""
     if EODHD_API_KEY in ("", "PASTE_KEY_FOR_LOCAL_RUNS") and "EODHD_API_KEY" not in os.environ:
         print("WARNING: EODHD_API_KEY not set. Calls will 401.", flush=True)
 
@@ -107,7 +108,7 @@ def pull_prices(tickers):
     for i, esym in enumerate(syms, 1):
         if i % BATCH_LOG == 0 or i == total:
             print(f"  {i}/{total} ...", flush=True)
-        rows = _pull_one(esym)
+        rows = _pull_one(esym, from_date)
         if rows is None:
             failed.append(esym); continue
         fr = _frame(rows, emap[esym])
