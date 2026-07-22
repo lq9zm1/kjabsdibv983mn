@@ -1,0 +1,27 @@
+name: pull-liquid-universe
+# Weekly EODHD Screener -> liquid_universe (US names with avg $vol >= $50M).
+# Feeds the ticker_review 'candidate' section (liquid names NOT in tickers.txt).
+# Liquidity moves slowly, so weekly is plenty; write_review reads whatever's loaded.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 8 * * 0'   # Sundays 08:00 UTC
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install --upgrade requests pandas google-cloud-bigquery google-cloud-bigquery-storage db-dtypes
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Screen liquid universe
+        env:
+          EODHD_API_KEY: ${{ secrets.EODHD_API_KEY }}
+        run: python pull_liquid_universe.py
