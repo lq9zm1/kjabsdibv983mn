@@ -110,3 +110,14 @@ SELECT c.ticker, c.theme, c.main_theme, c.etf, c.group_score, c.stock_rs, c.curr
   DATE_DIFF((SELECT d FROM latest), rc.last_mid_date,     DAY) AS days_since_mid,
   DATE_DIFF((SELECT d FROM latest), rc.last_laggard_date, DAY) AS days_since_laggard    -- just-climbed-out signal
 FROM cur c LEFT JOIN recency rc USING (ticker, theme);
+
+-- ---- (E) OPTION-B join source: ONE row per (ticker, date) — the tier in the stock's strongest theme.
+--      Join your fires on (ticker, date) with no theme needed. Full 2024+ history (self-contained; picks
+--      the theme where the name's own group_score is highest = its leading theme).
+CREATE OR REPLACE VIEW `stonks-498420.stonks_data.v_leader_tier_primary` AS
+SELECT * EXCEPT(rn) FROM (
+  SELECT td.*,
+    ROW_NUMBER() OVER (PARTITION BY td.ticker, td.date ORDER BY td.group_score DESC NULLS LAST) AS rn
+  FROM `stonks-498420.stonks_data.leader_tier_daily` td
+)
+WHERE rn = 1;
