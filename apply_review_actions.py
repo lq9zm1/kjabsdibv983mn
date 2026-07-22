@@ -3,7 +3,8 @@
 apply_review_actions.py — the nightly EXECUTOR for the ticker_review tab's Submit queue.
 
 Reads `ticker_review_actions` (status='pending') and APPLIES each queued action:
-  • action='theme'  -> add the ticker to that sub_theme in theme_map  AND  to tickers.txt
+  • action='theme'  -> MOVE the ticker into that sub_theme (cleared from any prior theme FIRST) in
+                       theme_map, AND ensure it's in tickers.txt. Re-theming a name never double-maps it.
   • action='remove' -> strip the ticker from theme_map  AND  tickers.txt (archived, reversible)
 Then rebuilds stock_theme_map ONCE, backfills full price history for any newly-ADDED tickers
 (so they're usable immediately, not only after the Sunday full reset), and marks the processed
@@ -308,11 +309,17 @@ def reconcile():
     git_commit(added, removed_from_file)             # push must succeed before we touch the DB
     print(f"   tickers.txt: +{len(added)} added {added or ''} | -{len(removed_from_file)} removed {removed_from_file or ''}")
 
-    # 2) theme_map (BigQuery) — adds then removes, then ONE stock_theme_map rebuild.
+    # 2) theme_map (BigQuery). A theme pick is a MOVE, not an append: clear the ticker from any
+    #    prior sub-theme FIRST, then place it in the chosen one — so re-theming a name (you changed
+    #    your mind on its group) never leaves it double-mapped. Then apply removes, then ONE rebuild.
+    theme_tickers = sorted({t[0].upper() for t in theme_ok})
+    if theme_tickers:
+        theme_map_strip(theme_tickers)                    # remove from ALL current themes first (MOVE)
     for tk, act, ts, canon in theme_ok:
-        n = theme_map_add(tk, canon)
-        print(f"   theme_map: {tk} -> '{canon}'" + (" (added)" if n else " (already present)"))
-    theme_map_strip(rem_syms)
+        theme_map_add(tk, canon)
+        print(f"   theme_map: {tk} -> '{canon}' (moved)")
+    if rem_syms:
+        theme_map_strip(rem_syms)
     if theme_ok or removes:
         rebuild_stock_theme_map()
         print("   stock_theme_map rebuilt (theme SQL 03/06/15 refresh later in this nightly).")
