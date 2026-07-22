@@ -1,0 +1,26 @@
+name: prune-delisted
+# Auto-prune CONFIRMED-delisted tickers from tickers.txt + theme_map, commit back.
+# Reads the nightly's ticker_review table, so it runs AFTER the week's nightlies have confirmed.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 12 * * 0'   # Sundays 12:30 UTC (after the weekly full re-pull)
+permissions:
+  contents: write            # lets the Action commit tickers.txt back to the repo
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4          # persist-credentials defaults true -> git push works
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: pip install --upgrade google-cloud-bigquery google-cloud-bigquery-storage db-dtypes
+      - name: Auth to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+      - name: Prune confirmed-delisted
+        run: python prune_delisted.py
