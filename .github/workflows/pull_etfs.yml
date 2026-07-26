@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 7 * * *'   # 07:00 UTC daily (after US EOD posts; weekend re-pulls are harmless)
+    - cron: '0 23 * * 1-5'   # 18:00 CDT — same-day evening pull (weekdays, after close)
 jobs:
   pull:
     runs-on: ubuntu-latest
