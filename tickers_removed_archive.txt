@@ -2,3 +2,7 @@
 2026-07-22	NSA	(ticker_review remove)
 2026-07-26	MBAV	(ticker_review remove)
 2026-07-26	TMHC	(ticker_review remove)
+2026-08-02	AVNS
+2026-08-02	CCIX
+2026-08-02	GRAF
+2026-08-02	ORLA
