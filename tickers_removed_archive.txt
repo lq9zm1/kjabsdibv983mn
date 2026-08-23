@@ -18,3 +18,5 @@
 2026-08-21	ISSC	(ticker_review remove)
 2026-08-21	TALK	(ticker_review remove)
 2026-08-21	WBS	(ticker_review remove)
+2026-08-23	LBRDA
+2026-08-23	LBRDK
