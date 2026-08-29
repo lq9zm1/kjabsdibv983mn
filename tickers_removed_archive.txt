@@ -21,3 +21,6 @@
 2026-08-23	LBRDA
 2026-08-23	LBRDK
 2026-08-26	TWO	(ticker_review remove)
+2026-08-29	BCAR	(ticker_review remove)
+2026-08-29	LEG	(ticker_review remove)
+2026-08-29	WILC	(ticker_review remove)
